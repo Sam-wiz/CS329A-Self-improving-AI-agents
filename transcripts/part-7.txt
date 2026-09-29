@@ -1,0 +1,1448 @@
+[00:00:05] So today's focus will be very much on improving
+[00:00:09] the models using search.
+[00:00:11] And there can be two kinds of search that we will see.
+[00:00:14] One in code models, where we are sampling a lot
+[00:00:17] and then we are searching based on that, and then deep research
+[00:00:21] style search, which you will see in homework three.
+[00:00:24] So a lot of what we will cover in AlphaCode
+[00:00:26] and AlphaCode 2, those search patterns
+[00:00:30] you will use also in homework.
+[00:00:32] Your homework two is focused on human eval,
+[00:00:35] so this will give you an overview
+[00:00:39] of what to expect in simpler problems
+[00:00:42] and then even more complex problems.
+[00:00:44] And then the agent search, this will
+[00:00:46] be closer to what we will give you in homework three.
+[00:00:52] The broad thing that I want to say with these models
+[00:00:55] is that we know that the solutions lie in the search
+[00:01:01] space of the models, but how do you curate the answer out
+[00:01:04] of the search space of what the model outputs is roughly
+[00:01:08] what we are covering today.
+[00:01:11] So let's start with AlphaCode.
+[00:01:15] So the problem we want to solve here
+[00:01:17] is a more complex version of the simple coding agent problem.
+[00:01:22] So if you use a coding agent, what you often get
+[00:01:25] is some form of an autocomplete, where you have a line,
+[00:01:29] and then the coding agent will complete the line for you.
+[00:01:33] So this is closer to a competitive programming problem,
+[00:01:36] where given a competitive programming problem,
+[00:01:40] you're given a problem description
+[00:01:42] and then you're given some input and outputs,
+[00:01:44] so you have some a contract in that programming problem, which
+[00:01:49] says that if you give this set of inputs,
+[00:01:51] you should get this set of outputs.
+[00:01:55] And what you want to really solve for
+[00:01:58] is how do we solve these competitive programming problems
+[00:02:01] so that--
+[00:02:03] so the things that we already are
+[00:02:05] able to do as code completions, but when
+[00:02:06] we try to do blocks of code, or solve real problems
+[00:02:10] end-to-end, that starts to be a much harder problem,
+[00:02:13] as you'll see in the ways that this problem gets solved.
+[00:02:17] So just to give you a preview of how AlphaCode came about
+[00:02:23] and what it achieved, and it was-- this is an older paper,
+[00:02:26] but it's worth remembering that at that point in time,
+[00:02:29] when AlphaCode was released, which is almost four years ago,
+[00:02:34] it ranked top 54% among the contest participants
+[00:02:39] in 10 contests, and this was the first time
+[00:02:41] it was shown that AI can generalize
+[00:02:43] beyond just narrow tasks and solve problems end-to-end.
+[00:02:47] And this was a much harder problem
+[00:02:50] than what you can do in just human eval, where you basically
+[00:02:53] are given a very small problem like complete this function,
+[00:02:57] or you're given instructions to exactly solve
+[00:02:59] what you want to solve, and you don't
+[00:03:00] have to reason about, understanding the problem
+[00:03:03] and then figuring out what it would take to solve the problem.
+[00:03:06] So this was definitely longer problem descriptions,
+[00:03:08] longer solution lengths, and you were
+[00:03:11] having to understand from the docstring, what
+[00:03:13] is the right solution approach even before going and solving
+[00:03:16] that?
+[00:03:16] So it's not just like taking the problem description
+[00:03:19] from the programmer and then just coding it up.
+[00:03:25] And this is well understood that when the models are generating
+[00:03:31] suggestions in one single line, it's much easier for us
+[00:03:34] as software developers to interact with that,
+[00:03:38] and you get much higher success rates, for example,
+[00:03:40] in Copilot and equivalent functions,
+[00:03:44] but when you have to solve problems end-to-end,
+[00:03:47] that ends up being a much harder problem.
+[00:03:50] And I'll go through each of these block diagrams one by one.
+[00:03:58] This is pre having large models, so they actually
+[00:04:00] were pre-training their own models.
+[00:04:02] The pre-trained models in the next report will get replaced,
+[00:04:06] so what you see here is that you have a stage, where you are
+[00:04:08] basically coming up with a model from which you
+[00:04:10] are going to sample.
+[00:04:12] Now this model we will later replace with a large language
+[00:04:17] model.
+[00:04:17] So here, they're also doing pre-training and fine tuning.
+[00:04:21] And the data that fed that data that really helped this model
+[00:04:24] train was GitHub data and then code contests.
+[00:04:28] What code contest is basically a large chunk
+[00:04:31] of problems and solutions that come
+[00:04:33] from competitive programming.
+[00:04:35] So once they trained the model here,
+[00:04:41] they're going to sample a lot of solutions.
+[00:04:43] So we have seen repeated sampling before,
+[00:04:46] so this is repeated sampling, but at a massive scale,
+[00:04:50] so you will end up with a lot of solutions.
+[00:04:52] And then you're going to play some tricks to figure out
+[00:04:56] which set of solutions should we even run tests on?
+[00:04:59] So, so far, we've just been closing the loop, where
+[00:05:02] we take whatever set of solutions the model outputs
+[00:05:06] and then running tests on them.
+[00:05:08] In this particular case, you're actually going to select,
+[00:05:10] so there's a selection stage before you're
+[00:05:13] going to complete and execute and evaluate.
+[00:05:17] So just to walk through things step-by-step.
+[00:05:21] And so the first step is pre-training.
+[00:05:24] You're going to pre-train a model.
+[00:05:26] In this particular case, they're going to use masked language
+[00:05:29] model loss.
+[00:05:30] You can also have a decoder only model, which we'll see shortly,
+[00:05:33] and the model is trained on GitHub code
+[00:05:36] about 700 gigabytes of that trained
+[00:05:39] with next token prediction.
+[00:05:42] What's interesting is that when they fine tune it,
+[00:05:44] they are using some tricks, so they're using regularization
+[00:05:48] so that they can assign higher probability
+[00:05:50] to more meaningful patterns.
+[00:05:51] This is interesting in code.
+[00:05:53] And then they're doing something called as value conditioning
+[00:05:57] and prediction.
+[00:05:58] So the thing that I want to highlight in this slide
+[00:06:00] is that in the regularization technique,
+[00:06:04] when they're doing fine tuning, they assign higher weight
+[00:06:06] to higher likelihood tokens so that there
+[00:06:09] are certain tokens that will have higher likelihood,
+[00:06:11] and then they are putting lower weight to lower likelihood
+[00:06:13] tokens, so this is called as GOLD,
+[00:06:15] so it will help improve the precision.
+[00:06:17] So in the next token prediction loss,
+[00:06:22] they are basically adding a weighting mechanism
+[00:06:24] to take into account the likelihood of the tokens also,
+[00:06:28] which helps in certain ways and helps
+[00:06:31] to assign high probabilities to more meaningful patterns,
+[00:06:35] so this is done in the fine tuning phase.
+[00:06:38] So once you get this model that is able to--
+[00:06:41] and this was an encoder, decoder model that they were initially
+[00:06:44] using, and then they also tried with decoder only models
+[00:06:46] in AlphaCode 2.
+[00:06:47] Once they get this model, they are going
+[00:06:49] to try large scale sampling.
+[00:06:52] They generate 1 million.
+[00:06:55] 1 million is a large number.
+[00:06:56] They generate 1 million diverse sample programs per question,
+[00:07:00] so if you have a question, a competitive programming
+[00:07:02] question, they're generating 1 million solutions,
+[00:07:05] half in Python, half in C++, so machines can do that.
+[00:07:09] And they randomize the problem tags and the ratings
+[00:07:12] in the prompt, and they use a high sampling temperature,
+[00:07:15] so it's like the solutions are going to be diverse.
+[00:07:20] And once they generate these solutions, what they're doing
+[00:07:23] is they are doing some amount of filtering and clustering.
+[00:07:26] So they filter the samples to only those that passed tests
+[00:07:30] given in the problem statement, and then they
+[00:07:32] are clustering them so that they're syntactically different,
+[00:07:36] but semantically equivalent, so they differentiate between that.
+[00:07:40] So they are basically using a clustering mechanism,
+[00:07:46] where they use a separate test input generation model,
+[00:07:49] train it to predict test inputs given problem descriptions,
+[00:07:52] and then create these new test inputs for unseen problems,
+[00:07:55] so they're basically trying to figure out
+[00:07:57] different tricks to cluster this test inputs,
+[00:08:03] the semantic equivalence being one way to do that.
+[00:08:06] Now the reason this clustering is important
+[00:08:08] is it is effectively providing a way for us
+[00:08:12] to select which set of solutions are diverse enough
+[00:08:15] for us to then evaluate to close the loop.
+[00:08:20] So now, what you can do is you can
+[00:08:23] submit only a subset of solutions
+[00:08:25] to the Codeforces platform, which is the actual competition
+[00:08:28] platform.
+[00:08:31] And that will check the program correctness.
+[00:08:33] It will benchmark against other best performers on this task
+[00:08:38] like human competitors, but the challenge here is that you
+[00:08:41] cannot submit all the solutions.
+[00:08:42] So 1 million solutions cannot be submitted to this platform,
+[00:08:46] so they have done a curation phase,
+[00:08:49] a filtering and clustering phase to get to this stage.
+[00:08:54] And then there's also evaluation on code contests.
+[00:08:56] Remember, that code contest was used to train the model,
+[00:08:59] so there is a test set that they hold out,
+[00:09:02] which will basically give them a signal.
+[00:09:05] So this is the data set that is created by authors,
+[00:09:07] but they can also measure signal on this particular data set
+[00:09:12] to figure out if their solution is supposed to do well or not.
+[00:09:17] So when they first did evaluation
+[00:09:20] on Codeforces platform, they took their model, ran it live,
+[00:09:26] generated samples, filtered with example test,
+[00:09:28] cluster to get some submissions, and then
+[00:09:31] submitted it to the platform, and they ran this with--
+[00:09:34] they submitted in 10 competitions,
+[00:09:35] which each had 5,000 participants.
+[00:09:38] And what they found was that their solutions
+[00:09:42] with this AlphaCode actually had an average ranking of 54.3,
+[00:09:47] assuming 10 submissions per problem, so not 1 million,
+[00:09:51] and it was competitive with 28% of the competitors
+[00:09:56] in the last six months.
+[00:09:58] So this table is showing you that if you
+[00:10:00] looked at a certain contest ID, how
+[00:10:03] was the AlphaCode model doing?
+[00:10:05] What was its percentage ranking, the best ranking
+[00:10:08] and the estimated ranking and the worst ranking relative
+[00:10:11] to other programmers?
+[00:10:13] This is more of a ranking based as to once you submit
+[00:10:15] a solution, you're ranked based on the efficiency
+[00:10:19] of your solution and the correctness of your solution.
+[00:10:26] Before I move further, questions?
+[00:10:34] Yes.
+[00:10:35] You go back to previous page.
+[00:10:37] It seems like the--
+[00:10:39] This one?
+[00:10:40] So numbers.
+[00:10:41] In the table, if you look at the performance
+[00:10:44] across different data sets, it seems that--
+[00:10:47] This is different contexts.
+[00:10:48] It seems they did pretty well with the final 1623.
+[00:10:52] Even the worst ones like 54% and 1618
+[00:10:56] we see the algorithm is pretty good.
+[00:11:01] But if you look at some others like 1613 and 1615
+[00:11:06] one is getting worse.
+[00:11:07] It's getting worse by 20%.
+[00:11:09] I'm just curious why [INAUDIBLE] variation of [INAUDIBLE].
+[00:11:17] I'll ask you that question back.
+[00:11:18] What do you think?
+[00:11:22] This is your pipeline.
+[00:11:28] Where will the variance come from?
+[00:11:31] So different contexts will have different problem inputs.
+[00:11:35] Maybe it's the two contexts.
+[00:11:37] So the two context, they perform well
+[00:11:39] is the context as similar as possible.
+[00:11:44] But there are other places that [INAUDIBLE]
+[00:11:49] somewhere in your context that the algorithm
+[00:11:52] may fail to or struggle to answer because it [INAUDIBLE].
+[00:12:01] The large scale-- so what's your name, again?
+[00:12:08] What he's asking is why do we get variance
+[00:12:10] across different context IDs, and it does well in one context
+[00:12:13] and does not do well in another?
+[00:12:15] So at the end of the day, you are
+[00:12:16] depending on how close are these say, contest problems?
+[00:12:23] In distribution, they are.
+[00:12:25] So that's one plausible hypothesis.
+[00:12:27] The other plausible hypothesis is that our ability to--
+[00:12:31] so in the large scale sampling, that
+[00:12:33] would control like is one of the solutions correct?
+[00:12:36] But then our ability to select the right set of candidate
+[00:12:40] solutions might also be affected in different context IDs,
+[00:12:43] so the selection stage can also be a bottleneck here.
+[00:12:48] There can be solutions that are almost correct, but not
+[00:12:52] completely correct.
+[00:12:55] Yes.
+[00:12:56] So the [INAUDIBLE] example seems like a very arbitrary one.
+[00:13:00] Do you have an experiment that shows how the model possibly
+[00:13:05] scales as the number of samples?
+[00:13:08] So I think you're basically right.
+[00:13:10] So they do have some experiments that they did,
+[00:13:12] but it's order of magnitude.
+[00:13:15] So with this particular model size,
+[00:13:17] and there is some results I'll show you.
+[00:13:19] With this particular model size, they
+[00:13:21] had to go for much larger number of samples.
+[00:13:24] If you remember from earlier slides on test time compute,
+[00:13:28] when you have smaller models, you
+[00:13:29] do have to go for much larger number of samples
+[00:13:31] to get the same pass@k.
+[00:13:35] For example, here is one of the saturates, because--
+[00:13:41] So let's look at the results and then come back to that comment.
+[00:13:43] But on the question around why is it
+[00:13:46] different in different contexts?
+[00:13:47] The inputs are different and then
+[00:13:49] the pipeline will-- the selection stage can
+[00:13:51] be a bottleneck, so both of those influence
+[00:13:54] where it does well and where it doesn't do well.
+[00:14:01] So there is two things worth noticing.
+[00:14:04] So when we compute solutions with repetitive sampling
+[00:14:10] in test-time compute, and this is something
+[00:14:12] that you're definitely using in homework two,
+[00:14:15] you have this notion of pass@k.
+[00:14:16] So that's the percentage of problems.
+[00:14:18] So if you get the model to generate k samples
+[00:14:21] and you submit all of them for evaluation on the hidden test,
+[00:14:24] how many problems will actually solve the problem description
+[00:14:29] that was given?
+[00:14:31] It measures how good is the search aspect of the sampling
+[00:14:34] process, so it's basically coverage in the lectures
+[00:14:37] that we covered before.
+[00:14:39] What this particular benchmark measures is 10@k.
+[00:14:45] 10 being the number of submissions
+[00:14:47] that you're going to go submit for evaluation.
+[00:14:50] So even if you get the model to output k samples,
+[00:14:54] in this particular case, 1 million,
+[00:14:57] you don't have the ability to measure correctness
+[00:15:00] on all the samples for the final set of solutions,
+[00:15:03] so you do have to do some selection, or scoring
+[00:15:07] to decide which set of solutions I'm going to submit.
+[00:15:09] So it measures also the filtering process
+[00:15:12] of how well the model will behave
+[00:15:15] when you have a very large number of samples,
+[00:15:17] so you're not just generating samples,
+[00:15:19] but you have to do some search yourself
+[00:15:21] before you can submit the solutions for evaluation
+[00:15:24] to hidden tasks.
+[00:15:26] Now, why does this matter?
+[00:15:28] So this is validation set and that's test set.
+[00:15:32] And they train different model sizes, so this is 9B model,
+[00:15:36] 41B model, so that's a larger model,
+[00:15:39] and then 41B with clustering.
+[00:15:41] And what they're presenting is validation set results
+[00:15:45] for 10@1k, so this is the question you were asking me.
+[00:15:51] They're basically going to submit 10 solutions out of 1k
+[00:15:54] generated outputs, and then keep increasing that to 10k, 100k,
+[00:15:59] and 1 million.
+[00:16:00] And then they're going to do similar set
+[00:16:02] for test set as well.
+[00:16:06] And what you will notice is that typically, the larger model
+[00:16:09] size consistently will do better than the smaller model size.
+[00:16:13] That is something we have talked about before.
+[00:16:16] But the other thing to notice is that as you
+[00:16:18] go for larger number of samples, which
+[00:16:20] is something we have seen as well, you are able to do better.
+[00:16:24] So going from 10@1k to 10@1 million,
+[00:16:27] you're clearly doing better, and same on the test set side.
+[00:16:31] And the clustering.
+[00:16:33] So typically, we had covered this slide with pass@ number
+[00:16:39] of samples.
+[00:16:40] In this particular case, even clustering is consistently--
+[00:16:45] so 10@1k will definitely also improve similar to pass@1k.
+[00:16:50] And then if you look at the last row here,
+[00:16:52] which is 41B plus clustering, you see that that's consistently
+[00:16:56] better.
+[00:16:56] So like 9B, versus 41B, versus 41B plus clustering.
+[00:17:00] The 41B plus clustering is definitely going to still be
+[00:17:03] better than the one before because it definitely provides
+[00:17:07] an improvement.
+[00:17:09] And the reason for doing that is because if you
+[00:17:11] were to measure the set of solutions
+[00:17:14] that the model has output and you wanted
+[00:17:15] to measure their diversity, the clustering provides you a way
+[00:17:18] to submit only the diverse set of solutions,
+[00:17:21] if you can only submit 10 problems.
+[00:17:24] And since competitive coding problems are quite difficult,
+[00:17:26] you don't get much benefit out of submitting
+[00:17:30] the same set of solutions to the evaluation process,
+[00:17:33] so if you can choose which set of problems to submit,
+[00:17:37] that helps.
+[00:17:42] And if we were to measure just 10@k and pass@k, if you had--
+[00:17:50] so pass@k would be unlimited attempts and 10@k would be 10
+[00:17:53] attempts on evaluating per problem.
+[00:17:55] On the x-axis, you have the sampling budget,
+[00:18:00] and on the y-axis, you have this accuracy
+[00:18:03] in terms of how many attempts you get to solve the problem.
+[00:18:06] The solve rate definitely scales linearly with more samples,
+[00:18:10] so this is very much in line with what we had seen for pass@k
+[00:18:12] in repeated sampling.
+[00:18:14] So even after the selection stage,
+[00:18:15] we definitely see the same log linear trend with more samples.
+[00:18:20] And better models have better slopes, so this particular case,
+[00:18:23] you see the 41B, which is the blue curve, has better solve--
+[00:18:28] Sorry, the purple curve, 41B, has better slope compared
+[00:18:32] to the 300 million parameter model at the bottom,
+[00:18:35] and same applies even for pass@k.
+[00:18:38] And then the final thing is that when only 10 samples are
+[00:18:42] submitted, then you do get bottlenecked in certain ways,
+[00:18:48] so you can get higher accuracy.
+[00:18:51] So if you compare the y-axis 10@k versus pass@k,
+[00:18:55] if you have unlimited attempts per problem,
+[00:18:58] which is a synthetic scenario, you are almost getting
+[00:19:02] to something above 40%, and here,
+[00:19:04] you are only getting to 30%, so there is definitely some
+[00:19:07] bottlenecking happening in selection stage.
+[00:19:09] So you are bottlenecked by how you filter and cluster
+[00:19:12] in some ways, when you have to choose which set of solutions
+[00:19:17] will pass the test.
+[00:19:21] Yes.
+[00:19:23] I'm just wondering if this trend continue,
+[00:19:26] you really got this tool another six or more.
+[00:19:31] That would be 1 trillion.
+[00:19:32] If you really get 1 trillion as the score,
+[00:19:35] this attracting demo will be double.
+[00:19:37] So I think that we really need to just make it 1 trillion.
+[00:19:43] We can just double the performance.
+[00:19:47] Well, we're going to AlphaCode 2.
+[00:19:49] Making the model better is a slightly easier access
+[00:19:51] than scaling the number of samples that you're going after.
+[00:19:55] So on AlphaCode 2, the model performance improves,
+[00:19:59] and that helps you reduce the number of samples
+[00:20:01] to get the same performance or at 1 million,
+[00:20:03] you'll get a much better performance.
+[00:20:05] So this is an older model, but it's a weaker model.
+[00:20:08] But the trends generally hold.
+[00:20:12] And in some ways, there a--
+[00:20:16] I mean, the larger models have done better generally speaking,
+[00:20:19] but there's a model capability gap.
+[00:20:21] So if the base models are not strong enough,
+[00:20:24] they're going to hit limits at a certain point.
+[00:20:27] So the problem is if you really have no problem with the sample
+[00:20:30] budget.
+[00:20:30] So you can really be confident in the whole purpose,
+[00:20:34] or you can just really do one bit of a three example
+[00:20:39] with this graph.
+[00:20:40] If the log linear trend continues then yes.
+[00:20:43] That might be a project idea worth exploring if the costs are
+[00:20:47] not prohibitive.
+[00:20:54] Yes.
+[00:20:55] I just want to say I think that could
+[00:20:56] be really useful if you think that one problem is really
+[00:20:58] important.
+[00:20:59] You can just forward your--
+[00:21:01] All you can do is solving that problem.
+[00:21:03] According too, yeah.
+[00:21:06] I think the challenge for that, which
+[00:21:08] is something that is worth also-- that's a good comment.
+[00:21:12] So one of the challenges with solving it that way
+[00:21:15] is that you kind of assume that if we sample more,
+[00:21:18] the diversity continues to increase.
+[00:21:22] So one of the challenges that we will see in AlphaGo 2,
+[00:21:24] and I'll emphasize again, is that you
+[00:21:26] do have to ensure that as you sample more and more,
+[00:21:29] you are getting more diverse solutions.
+[00:21:31] And part of the process of clustering
+[00:21:33] is that it's effectively figuring out
+[00:21:35] which are the diverse set of solutions.
+[00:21:37] So if you sample 10x more than what was sampled here,
+[00:21:40] that you don't end up with more diverse solutions,
+[00:21:42] then you're actually not going to improve.
+[00:21:46] Is there a reason why we have a log linear relationship here?
+[00:21:50] Why is it not any other modeling of y versus x?
+[00:21:55] So this was covered earlier, I think the passer k
+[00:21:58] versus unlimited attempts.
+[00:22:00] This is theoretically derivable.
+[00:22:03] And I think the main thing that I'm emphasizing
+[00:22:05] is that even after the selection phase,
+[00:22:07] that log linear trend holds.
+[00:22:10] The passer k versus sample budget, this was covered in--
+[00:22:14] I don't know the lecture number, but Azalea
+[00:22:15] covered this in that paper actually theoretically derives
+[00:22:18] it.
+[00:22:19] This is the large language monkey's paper
+[00:22:21] or the one right after that.
+[00:22:24] Yeah, but if you look at the derivation,
+[00:22:27] we can work through that offline.
+[00:22:36] OK, So if we look at takeaways, I
+[00:22:39] think the fun aspect here is that we
+[00:22:42] can get high coverage by sampling,
+[00:22:45] and then-- so this large-scale sampling, this filtering,
+[00:22:48] and the clustering approach, you can get higher coverage.
+[00:22:52] And they were able to actually also make sure
+[00:22:56] that the model is not just copying existing solutions.
+[00:22:59] It actually reasons.
+[00:23:00] So they did some search over the training data
+[00:23:02] and actually saw that there was-- the generated code
+[00:23:05] had some novelty.
+[00:23:06] So this was actually generalization out
+[00:23:09] of distribution.
+[00:23:10] The challenge with these particular set
+[00:23:12] of approaches that they noticed that's worth highlighting
+[00:23:14] is that they were training the model on loss.
+[00:23:17] And loss is often a poor proxy for solve rates,
+[00:23:20] so because there are many solutions that
+[00:23:23] could have solved the problem.
+[00:23:24] So they did see that this model did not
+[00:23:26] do well on say, dynamic programming or constructive
+[00:23:29] algorithms in some ways.
+[00:23:31] So it was not the strong in certain domains.
+[00:23:35] And then the other aspect was that it was requiring
+[00:23:38] a large-scale set of sampling.
+[00:23:40] So that was not ideal in terms of how practical this
+[00:23:43] is to be used everywhere.
+[00:23:48] If there was a time bound, then you can imagine.
+[00:23:54] So if you basically were just examining accuracy,
+[00:23:57] then you want to make unlimited attempts.
+[00:23:59] But if you want to do time-limited bound in terms
+[00:24:03] of efficiency, then you do want to rank acceptable solutions
+[00:24:06] as they get generated.
+[00:24:08] So that becomes really important.
+[00:24:10] And as I already mentioned, the more difficult domains
+[00:24:15] required more experiments.
+[00:24:16] So this was not like-- this solution approach actually
+[00:24:20] wasn't working well on difficult problems.
+[00:24:22] And in fact, there, it's both a matter of you
+[00:24:26] might need more steps to solve the problem.
+[00:24:28] So this particular approach in one shot
+[00:24:30] did not do a reasonably strong job.
+[00:24:32] So multi-step solution approaches would do better here.
+[00:24:38] So this was AlphaCode summary.
+[00:24:41] Now, let's see.
+[00:24:42] What can we do better?
+[00:24:43] So this was like 2022.
+[00:24:45] If you look at the next set of paper which is AlphaCode 2,
+[00:24:48] they improved upon this substantially.
+[00:24:50] And that was really helpful.
+[00:24:53] And we can also learn what were the differences.
+[00:24:57] And that really helps us understand what pushes
+[00:24:59] the frontier even further.
+[00:25:01] So AlphaCode 2 started with a hypothesis of what
+[00:25:04] if you don't pre-train your model?
+[00:25:06] You use an existing LLM.
+[00:25:08] So in this particular case, this work was at Google.
+[00:25:10] So they decided to use Gemini Pro instead of using
+[00:25:16] in training their own model.
+[00:25:18] And then, they want to customize it to get a better performance
+[00:25:22] on this particular problem set on competitive programming.
+[00:25:27] So the first set of changes that were made
+[00:25:29] were that instead of pre-training,
+[00:25:31] you basically are just going to fine tune Gemini Pro.
+[00:25:33] So it's not just prompting.
+[00:25:35] They are fine tuning the model.
+[00:25:36] And then, in terms of sampling and evaluation
+[00:25:40] for the large-scale sampling, they want to ensure diversity.
+[00:25:43] So for diversity, they actually had multiple AlphaGo 2 models
+[00:25:47] that allow for massive sampling.
+[00:25:49] So when they did and go and do fine tuning,
+[00:25:52] they actually had multiple variants of this model
+[00:25:55] so that they get diversity in the output sampling.
+[00:25:58] And then the third thing they did
+[00:25:59] was that to select the subset of candidates,
+[00:26:03] they had a scoring model.
+[00:26:04] So you can see that as a reward model,
+[00:26:08] which was used for obtaining the best candidates.
+[00:26:11] So it's not just based on clustering and filtering,
+[00:26:13] which is a heuristic for saying OK, this
+[00:26:16] would be semantically equivalent,
+[00:26:21] but there's diversity in syntax.
+[00:26:24] They are actually now going for a scoring function
+[00:26:26] which can learn that function.
+[00:26:29] So it's a learned approximation of what
+[00:26:31] should be given high score and what should be given low score.
+[00:26:36] So the new ideas here, as I highlighted,
+[00:26:40] was A, that they are going to fine-tune a Gemini Pro
+[00:26:44] model to score correctness before submitting.
+[00:26:46] So that's a reward model.
+[00:26:48] And they also had a family of models
+[00:26:50] based on different hyperparameters,
+[00:26:52] so different difficulty levels, different tags.
+[00:26:55] So they fine-tune several models with varied hyperparameters,
+[00:26:58] and then that maximizes the diversity of the number
+[00:27:00] of samples they generate.
+[00:27:02] And they also improve their data sets.
+[00:27:04] So the data set that they fine-tune on
+[00:27:07] is V2 version of CodeContests, which is actually open source.
+[00:27:10] And then, they had another high-quality data
+[00:27:12] set for scoring purposes.
+[00:27:16] So going back to this diagram, what changes next?
+[00:27:21] So let's take a more detailed look.
+[00:27:24] So here, if you look at the input model on the fine-tuning
+[00:27:29] stage, you have this new data set
+[00:27:31] called CodeContests V2, which is going to be used to generate.
+[00:27:38] Now, you're going to do some tagging.
+[00:27:39] So there's some amount just like, take your CodeContests V2
+[00:27:43] data set and put--
+[00:27:44] bisect it or rather segment it into different data sets
+[00:27:48] to fine-tune different versions of models that
+[00:27:51] are going to generate samples.
+[00:27:53] So that's one set of intermediate AlphaCode 2 models
+[00:27:56] that they will generate.
+[00:27:58] And then they had another high-quality data
+[00:27:59] set they're going to use to make this even better.
+[00:28:02] And this same set of model, same set of data
+[00:28:05] will also be used to generate a scoring
+[00:28:07] model from the same model.
+[00:28:10] And based on that, they're going to--
+[00:28:12] so this is basically a notion of the zero.
+[00:28:16] The data set is segmented and used to tune multiple models
+[00:28:21] to get more diverse samples.
+[00:28:25] What's different about the data set
+[00:28:26] is that the problems and solutions are higher quality
+[00:28:30] and vetted and scored better.
+[00:28:32] And the scoring model is able to estimate
+[00:28:36] the correctness of the code sample between 0 and 1
+[00:28:39] based on this higher quality data set.
+[00:28:41] So they manually curate it.
+[00:28:44] This data set got more human annotators in place
+[00:28:47] so that they could train the model
+[00:28:51] to estimate correctness better.
+[00:28:54] And then the other aspect is that they
+[00:28:56] had this family of models instead
+[00:28:58] of having just one model.
+[00:29:00] Now, on the sampling and evaluation side,
+[00:29:06] they split the sampling across models.
+[00:29:08] They in fact, went to only C++.
+[00:29:10] Earlier it was C++ and Python half samples.
+[00:29:13] So they split the sampling across models but only C++.
+[00:29:16] And when they generate the samples,
+[00:29:19] they're randomizing the temperature and the metadata
+[00:29:22] so that they can get diverse outputs.
+[00:29:23] So this is the massive sampling pipeline.
+[00:29:27] For each output, they're going to execute on test input,
+[00:29:30] and they are filtering out anything that's
+[00:29:32] incorrect or doesn't compile.
+[00:29:34] So they remove 95% of the samples.
+[00:29:36] At this point, they're left with about 50 case samples.
+[00:29:39] And then, after that process, they're
+[00:29:42] going to aggregate and keep the top 10 largest clusters.
+[00:29:46] There's reranking on top of that based on the scoring model
+[00:29:51] to say how likely is it to be correct.
+[00:29:53] So they score each code sample and pick
+[00:29:56] the best candidate per cluster.
+[00:29:58] And once they have that, that's when
+[00:30:00] they're going to submit and say that did
+[00:30:02] it win or did it not win?
+[00:30:04] The eval is going to be same as AlphaCode.
+[00:30:07] So if we are to compare results now,
+[00:30:10] this is comparing AlphaCode 2 versus AlphaCode.
+[00:30:13] So AlphaCode-- so on the x-axis, you see the sampling budget.
+[00:30:19] AlphaCode, we were doing 1 million samples.
+[00:30:21] Here, we are going to vary the sampling budget per problem.
+[00:30:25] And on the y-axis, you have solve rate.
+[00:30:29] As you can see that, once you get to 100 samples, you
+[00:30:33] basically--
+[00:30:34] so AlphaCode was using 1 million samples.
+[00:30:36] For AlphaCode 2, once you get to 100 samples,
+[00:30:39] you are achieving the same solve rate as AlphaCode.
+[00:30:43] And if you want to go beyond that, you can use more samples.
+[00:30:47] So the solve rate is still improving with the increase
+[00:30:50] in sampling budget.
+[00:30:51] And if you were to basically say,
+[00:30:54] what is the maximum performance achieved?
+[00:30:56] AlphaCode 2 with 1 million was solving 43%.
+[00:31:01] It was getting 43% solve rate, while AlphaCode was only
+[00:31:04] getting 25%.
+[00:31:05] So in this particular case, even though there
+[00:31:09] is using the same number of samples,
+[00:31:12] a better base model, better diverse solutions, and then
+[00:31:15] better scoring is giving them.
+[00:31:16] So this whole system is giving them performance gains,
+[00:31:19] which is almost 2x relative to where the previous system was.
+[00:31:27] Questions?
+[00:31:31] Yes.
+[00:31:34] 95% of sampling wasted on not compiling or a poor answer
+[00:31:41] seems like a very high cost.
+[00:31:42] Were there any other studies to see
+[00:31:45] if there could be better methods of sampling, more
+[00:31:48] reliable answers, maybe really better prompting, or--
+[00:31:51] I mean, it didn't mention randomized temperature,
+[00:31:53] but were there any other approaches?
+[00:31:57] So in this particular case, this paper did not.
+[00:32:00] But if you are to refer to some of the work
+[00:32:02] that we have discussed before, what would
+[00:32:04] you need to do to improve that?
+[00:32:09] This is an older piece of work, right?
+[00:32:11] Yes.
+[00:32:12] I would try the approaches we took in homework 1.
+[00:32:18] Like?
+[00:32:19] Like better prompting or better--
+[00:32:23] maybe using-- instead of wasting all
+[00:32:25] of the compute on 1 million sample,
+[00:32:28] maybe I would try to self-iterate
+[00:32:30] based on one of the sampling at least once or maybe at least
+[00:32:33] try to have a better method of aggregating
+[00:32:36] some of the information from the various sampling.
+[00:32:38] Great.
+[00:32:39] So I think what you're saying-- so just to repeat the answer,
+[00:32:43] in homework 1, you had done some form of self-refinement.
+[00:32:46] So this is essentially parallel search, in some ways.
+[00:32:48] You've generated a lot of solutions,
+[00:32:50] and then you are clustering on top of that.
+[00:32:53] If you do a refinement process where
+[00:32:55] you have generated some solutions
+[00:32:57] and then you're saying, OK, if I can get any feedback on top,
+[00:33:00] then can I improve these solutions better?
+[00:33:02] That's one approach that would cut down the number of samples,
+[00:33:04] but increase the time that if you can collect any feedback.
+[00:33:10] The question I would ask is that how would you collect feedback?
+[00:33:12] Like, what would be feedback in this particular case?
+[00:33:15] That's worth thinking through.
+[00:33:18] I think the other comment would be that if you can get the model
+[00:33:22] to do slightly better with RL, so if it can get better
+[00:33:25] at solving things with the RL loop
+[00:33:30] in between when we cover train time scaling,
+[00:33:32] then that can help cut down how much we
+[00:33:34] need to put in test time.
+[00:33:36] So both those approaches can reduce
+[00:33:39] the cost on the sampling side.
+[00:33:46] Let's try that one.
+[00:33:48] So when it comes to a practical application--
+[00:33:51] so when we are using everyday thinking models
+[00:33:55] and we are still talking about a couple of dozens of samples,
+[00:33:59] I mean when it comes to time scale,
+[00:34:01] and when we hear about these OpenAI authenticate a month's
+[00:34:07] researcher, those are the multi thousand, multi
+[00:34:11] hundreds of case of samples applied in production.
+[00:34:17] So I think the way to look at the system
+[00:34:19] is more of how you would build a system that is generating
+[00:34:23] those dozen of samples.
+[00:34:25] I think we have discussed this before.
+[00:34:28] For us to think about these systems,
+[00:34:31] I think the big question you're asking
+[00:34:33] is how would you build the system
+[00:34:37] to begin with that can reason well, that can close the loop?
+[00:34:40] So I think there is a line of research which has
+[00:34:43] tried to answer that question.
+[00:34:45] And what this is covering is that if you started with an LLM
+[00:34:48] and you wanted to solve these complex problems,
+[00:34:51] how would you build a system that can solve that problem?
+[00:34:54] And then, if you can distill all of that knowledge
+[00:34:56] into a single model, then that becomes a large reasoning model.
+[00:35:00] But this is more of a multi-agent system
+[00:35:05] in almost some ways, where you're basically
+[00:35:07] having one model produce outputs and then another model score it.
+[00:35:11] And then, here a family of models is producing outputs,
+[00:35:14] and then there is another family of models that's scoring it.
+[00:35:17] So that gives you more tricks up your sleeve if you had
+[00:35:21] to re-architect the system from scratch,
+[00:35:23] as opposed to depending on what the current generation of models
+[00:35:26] can or cannot do.
+[00:35:28] And the paradigm, I believe, because at the end
+[00:35:31] of the day, when we are saying in test-time compute,
+[00:35:34] there should be a solution in this space of what
+[00:35:36] model outputs generated, the paradigm
+[00:35:39] is effectively that you should be able to search that solution.
+[00:35:42] So what this is roughly answering
+[00:35:43] is how would you search for a solution in the output
+[00:35:48] space of what models output?
+[00:35:54] You still have question?
+[00:35:55] Yes.
+[00:35:57] So why is the scoring model here?
+[00:36:01] Nothing is a suppose gift.
+[00:36:03] Say that again.
+[00:36:04] Why is the scoring model--
+[00:36:05] I think the value is called-- how am I saying this?
+[00:36:10] Why is it called--
+[00:36:11] why is the scoring model only desired model use?
+[00:36:15] So I think the way to look at it is
+[00:36:17] that why is the scoring model not using code count as V2?
+[00:36:20] I mean, you can train your--
+[00:36:22] so the code counts as V2, there would be contamination, right?
+[00:36:26] The scoring model should not see exactly the same data,
+[00:36:29] but it does need to see some data in the distribution, right?
+[00:36:33] It's basically a matter of you're training the scoring
+[00:36:36] model, not necessarily on the same problems,
+[00:36:38] but you want this-- if you're designing that system from
+[00:36:41] scratch, how would you train a reward model?
+[00:36:43] Would you you want to show it is that for these kind of problems,
+[00:36:45] if you had these two solutions, which solution
+[00:36:47] should you prefer?
+[00:36:50] That's what you're teaching the scoring model
+[00:36:52] or what ranking should you apply to that?
+[00:36:57] And if your first train-- well, that is you on budget.
+[00:37:00] So the first train is that kind of model
+[00:37:01] that you have to decide.
+[00:37:03] Is it the same, for example the two legal set that it were?
+[00:37:11] I mean, you could have mixed those data sets
+[00:37:13] and then done the same thing, yes.
+[00:37:16] But that is a doable exercise.
+[00:37:18] It's just multi-stage.
+[00:37:21] It's not the same in the sense that when
+[00:37:25] you do any kind of fine-tuning, if you're
+[00:37:27] changing the quality, then the model--
+[00:37:29] and if you're not mixing the previous version,
+[00:37:31] then the model is forgetting some of the previous information
+[00:37:34] when it's tuning in the last stage.
+[00:37:39] OK?
+[00:37:46] So if you were to look at the aggregate results of AlphaCode 2
+[00:37:50] in terms of the normalized score versus the how it would compare
+[00:37:56] to human contestants, there.
+[00:37:59] And the way you would do that is you
+[00:38:00] would basically compare the percentile of contestants
+[00:38:03] who score at a certain level.
+[00:38:06] What AlphaCode two was achieving is 85th percentile between
+[00:38:10] the expert and the candidate or the master candidate solutions,
+[00:38:15] while the human--
+[00:38:18] While AlphaCode was outperforming, 46% AlphaCode 2,
+[00:38:22] if you took top two performance on the-- if you took top two
+[00:38:26] solutions, then it was actually outperforming 99.5%,
+[00:38:30] but overall, it was basically scoring closer to 85th
+[00:38:33] percentile across human contestants.
+[00:38:35] So that was a big deal.
+[00:38:36] It was like, OK, in this particular code, these problems
+[00:38:39] and this competitive programming,
+[00:38:41] it's doing very well in some way.
+[00:38:43] So that was a big accomplishment in one
+[00:38:46] single year just with an improved system.
+[00:38:51] And I think, for us, what's worth
+[00:38:54] learning here is that we are increasing the performance
+[00:38:57] with less number of samples.
+[00:38:58] So we didn't have to necessarily scale the number of samples.
+[00:39:02] But we had better foundation model.
+[00:39:04] And then the scoring model that is selecting the best candidate
+[00:39:07] is also helping the solution.
+[00:39:10] The experimentation is still quite costly.
+[00:39:12] And then, as one of our classmates pointed out,
+[00:39:16] this is very specific to code.
+[00:39:18] And then a lot of the compute is wasted in generating samples
+[00:39:21] that might have bad syntax and so on that you
+[00:39:23] have to go and filter out.
+[00:39:25] So one set of questions that I have for the class
+[00:39:28] at this point in time is that how would
+[00:39:34] you change these methods based on task complexity, for example?
+[00:39:39] So actually, I will pose that question.
+[00:39:42] And then the other question I will
+[00:39:43] pose is, how can we embed reasoning directly
+[00:39:46] into these models?
+[00:39:48] Take a minute to talk to folks next to you or somewhere
+[00:39:53] in the vicinity.
+[00:39:54] And then let's come back and discuss those two questions.
+[00:40:01] Let's tackle the second question.
+[00:40:03] So how can we change these methods
+[00:40:05] based on task complexity?
+[00:40:06] So if I have easy problems versus hard problems.
+[00:40:10] Any takers for that?
+[00:40:20] OK.
+[00:40:20] What you could do is you have a separate model initially judge
+[00:40:25] each question based of it.
+[00:40:27] It would made easy, medium, or hard.
+[00:40:29] And you create, like your data set where you're sampling
+[00:40:32] from also has those labels.
+[00:40:33] Then in this, if you declare a question that's easy,
+[00:40:35] you sample more from the easy bank.
+[00:40:38] So it's a better sample you can struggle with.
+[00:40:41] So is it more on the training side
+[00:40:43] you will change or is it more on the sampling side
+[00:40:45] that you'll make this change?
+[00:40:46] More on the sampling side.
+[00:40:48] That's where you will change.
+[00:40:49] There isn't more-- you can root any more of this.
+[00:40:52] OK, so you're saying that if you have a simple problem, then
+[00:40:57] you will sample more from--
+[00:41:01] --the simple problems, yeah.
+[00:41:03] OK.
+[00:41:05] So you will-- in AlphaCode 2 basically,
+[00:41:07] you will use the model that's trained
+[00:41:09] on perhaps simpler problems.
+[00:41:10] Is that the suggestion?
+[00:41:11] OK.
+[00:41:14] Are there ideas?
+[00:41:19] The solver did improve with model size.
+[00:41:21] That's--
+[00:41:30] What if you can identify a simpler problem,
+[00:41:33] maybe you can run with less samples.
+[00:41:37] Yes, exactly.
+[00:41:38] So if the model--
+[00:41:42] so this is something that was probably
+[00:41:43] seen in the repetitive sampling and the test-time compute
+[00:41:45] as well, is to-- if you have simpler problems,
+[00:41:48] then it's likely that you can get coverage
+[00:41:50] with fewer number of samples.
+[00:41:51] So you don't have to go to 1 million samples
+[00:41:53] every single time.
+[00:41:54] It's almost like saying the model does--
+[00:41:58] more likely to generate the solution in the search
+[00:42:00] space of what it outputs.
+[00:42:03] So it should be easier to sample or its initial set of solutions
+[00:42:10] with some iteration, with some iterative refinement should
+[00:42:14] be easier to correct, as opposed to having to generate
+[00:42:17] a lot of different solutions.
+[00:42:18] One of the gains that you get if you generate
+[00:42:21] a lot of parallel solutions is that you're
+[00:42:24] trying to get the model to provide diversity
+[00:42:27] in the approaches, and you're not
+[00:42:29] trying to get it to fix what it already output.
+[00:42:35] What about the question four?
+[00:42:37] How can we embed reasoning directly into the model?
+[00:42:43] OK, let's try out.
+[00:42:45] Let's see what you already said.
+[00:42:46] Maybe you can have more on the training side.
+[00:42:49] By dealing with the training side,
+[00:42:50] you can take all the comments off.
+[00:42:53] You've done enough problems so you know in the second one
+[00:42:57] how it already feels after, like the framework of the solution.
+[00:43:00] Instead of one, you know it's very probably to the problems
+[00:43:04] that we mentioned in that framework.
+[00:43:05] And that is slightly--
+[00:43:07] it's slightly different than the standard of directly for when
+[00:43:10] solving being the change or we'll be solving.
+[00:43:13] We have the final solution and the bit of the final solution.
+[00:43:16] So if we don't have enough common data,
+[00:43:19] then we use the LLM to test if there's a code
+[00:43:23] to see the first section is about what,
+[00:43:26] the second section is about what,
+[00:43:27] the third section about what.
+[00:43:28] So it's-- the training data is that part of the training.
+[00:43:32] The data is only the framework, the set
+[00:43:35] where it's that few steps with that form
+[00:43:36] under that pre-training and that space between the same.
+[00:43:41] OK.
+[00:43:42] So what Geoffrey is saying is that you
+[00:43:44] add hints in your training data set around the solution of what
+[00:43:47] kind of algorithm is being used to solve the problem.
+[00:43:50] What's a more generic version of that?
+[00:43:53] What have we already covered in that line of work?
+[00:43:59] As programmers, you think before you write the answer.
+[00:44:03] What if that thinking could be captured?
+[00:44:08] If you added those chain of thought
+[00:44:10] as part of your training set or if you remember
+[00:44:13] the STAR approach where you're getting the model
+[00:44:16] to generate the solution and then give the hint as the answer
+[00:44:20] and then ask it to come up with that reasoning, then
+[00:44:23] that can also be part of how the model embeds it, right?
+[00:44:31] Any other ideas?
+[00:44:35] I think the other interesting thing that was mentioned,
+[00:44:38] which is probably worth highlighting,
+[00:44:39] is that if you have a more complex problem than you might
+[00:44:42] want to decompose the problem into subparts
+[00:44:46] and add hints for subparts as opposed to trying
+[00:44:50] to solve the problem in one go, because these are hard problems.
+[00:44:57] Yes.
+[00:44:58] It's about what you tackled that for the standalone
+[00:45:00] but that's sequential.
+[00:45:01] Maybe you give-- you succeed on the first intermediate output,
+[00:45:06] and you have something forward that is never going
+[00:45:08] to make the second part work.
+[00:45:10] So how does that sequential or how can you decompose that work?
+[00:45:15] So I think all of these are hinting at we do need to close
+[00:45:20] the loop at some point in a multi-step fashion and almost
+[00:45:23] want a tree search style of solution where you basically
+[00:45:26] want the--
+[00:45:29] I basically sample for, say, the first step,
+[00:45:31] and is that roughly correct?
+[00:45:32] And you want to sample for the second step,
+[00:45:34] and then you want to be able to backtrack.
+[00:45:36] So it's roughly heading in that direction,
+[00:45:39] but it's early work that gives you hints.
+[00:45:44] So it's basically got on your thinking,
+[00:45:46] and then perhaps that's your project, right?
+[00:45:48] But your question is very relevant
+[00:45:50] as to what happens if your answer is
+[00:45:54] correct in the first step, but then the next step
+[00:45:56] is not correct?
+[00:45:59] And the task decomposition is often
+[00:46:02] relevant in that most problems have a certain way of solving.
+[00:46:06] So if there is common instructed patterns, then that's doable.
+[00:46:09] But if you do expect patterns that
+[00:46:11] are out of distribution, then maybe,
+[00:46:14] you do need human in the loop.
+[00:46:18] That's like a scientist style of work
+[00:46:20] that folks covered last lecture.
+[00:46:31] OK?
+[00:46:32] OK?
+[00:46:33] Let's come to the last part.
+[00:46:35] So we spent a lot of time on just code
+[00:46:39] and how to select a set of code samples
+[00:46:45] that can pass and solve competitive coding problems.
+[00:46:49] Now, let's look at how would you do something
+[00:46:52] like building a deep research agent?
+[00:46:55] So Search-o1 is basically going to use large reasoning models
+[00:46:58] as the base and then try to build a deep research
+[00:47:02] agents on top of that.
+[00:47:03] And it's worth paying attention because you
+[00:47:06] will use this in homework 3.
+[00:47:08] So the key idea here is that you want to use large reasoning
+[00:47:12] models to retrieve based on a query
+[00:47:15] that you want to give the model.
+[00:47:16] So large reasoning models have impressive reasoning,
+[00:47:20] but as you know that most of these models
+[00:47:22] are trained on with some knowledge
+[00:47:24] cut off dates, so they typically will not
+[00:47:26] have the freshest knowledge.
+[00:47:28] If something happened yesterday, the model
+[00:47:30] will need to go look up that data.
+[00:47:32] It's not going to be there in the model.
+[00:47:36] The other challenge when you work with reasoning models, per
+[00:47:39] se, is that they will go and output a lot of tokens
+[00:47:43] in long-form reasoning, but when they have knowledge gaps,
+[00:47:46] they will be using terms that are expressing uncertainty.
+[00:47:51] So one example is that if you go use benchmark on GPQA data set,
+[00:47:56] you will see the term perhaps in the reasoning chains a lot,
+[00:48:01] or you will see the term alternatively or wait or--
+[00:48:06] so they're basically expressing that the knowledge
+[00:48:09] gaps will show up as uncertainty in the way the model is
+[00:48:12] thinking.
+[00:48:13] So you want to bootstrap that in some way,
+[00:48:16] because otherwise, those knowledge
+[00:48:17] gaps will continue to propagate through the entire reasoning
+[00:48:20] chain.
+[00:48:21] Now, one simple solution based on learning from feedback
+[00:48:24] or learning from tool calls is that why don't we
+[00:48:26] just take this query and get a relevant document?
+[00:48:32] So you take this query, pass it to a search tool,
+[00:48:35] and get the relevant document, and then
+[00:48:38] put that document in the prompt, and then get the model to output
+[00:48:41] based on that.
+[00:48:43] Why is that not enough?
+[00:48:44] So that would be more like retrieval augmented generation.
+[00:48:47] So whatever is your question, you generate a query,
+[00:48:51] and you get a document, and you put it in the prompt,
+[00:48:54] and then that's what you use to retrieve the answer.
+[00:48:58] Now, the challenge with that sort of simple approach
+[00:49:01] is that you retrieve once at the beginning.
+[00:49:04] So you don't have the ability to tweak things.
+[00:49:06] And it's possible that if your search problem is
+[00:49:10] complex enough, then each reasoning step
+[00:49:13] will need different pieces of information.
+[00:49:15] So if you have a problem, which is asking just the weather,
+[00:49:18] then maybe a single search call is enough,
+[00:49:20] but if you're asking to solve a complex problem, which
+[00:49:23] has multiple parts to solving it,
+[00:49:26] then after it gets through a certain amount of reasoning,
+[00:49:28] it needs to go look up additional information.
+[00:49:31] So for complex reasoning, it's extremely hard to get it right,
+[00:49:34] and same for multi-step reasoning.
+[00:49:36] So typically, retrieval augmented
+[00:49:38] generation will improve--
+[00:49:41] will show improvement over direct reasoning,
+[00:49:43] but in multi-step reasoning, it definitely suffers.
+[00:49:46] So the solution that Search-o1 proposes
+[00:49:49] is that the model generates the queries on the go.
+[00:49:55] So whenever it sees these knowledge gaps,
+[00:49:57] it will trigger a query.
+[00:49:59] It will generate a search query of what
+[00:50:02] tool calls to generate and go search things over.
+[00:50:07] And there will be multiple iterations
+[00:50:09] in a single reasoning session of like fetching these documents.
+[00:50:12] And the second thing it will do differently,
+[00:50:14] and I will show examples of that,
+[00:50:16] is that it will analyze the retrieved documents.
+[00:50:19] So instead of just dumping what it retrieved as the document,
+[00:50:22] it will analyze the retrieved document
+[00:50:24] and extract relevant chunks of information from there.
+[00:50:28] And it will only put these relevant information
+[00:50:32] into the prompts so that it integrates well
+[00:50:36] into the reasoning chain.
+[00:50:40] So just to reiterate how this works--
+[00:50:44] so this is an original question, which
+[00:50:45] is a chemistry question, which is talking about--
+[00:50:48] it wants to get the carbon atoms count of product 3
+[00:50:52] which is output of a bunch of different chemical reactions.
+[00:50:56] So if you were to use a large reasoning model,
+[00:50:59] you would ask the model to start thinking.
+[00:51:01] It looks at this term, which I don't understand,
+[00:51:04] and perhaps the model doesn't understand.
+[00:51:06] So it will go ask a lookup, what does it mean?
+[00:51:10] Now, one trick is that it doesn't go look up,
+[00:51:12] so it makes a guess and comes up with whatever
+[00:51:15] is in its knowledge base in the stored weights
+[00:51:17] and provides a final answer based on what it guessed.
+[00:51:21] But if there is a guess here, and it got the answer wrong,
+[00:51:24] then those things will cascade as errors
+[00:51:26] into whatever is the final answer.
+[00:51:28] So all the perhaps or all the uncertainty
+[00:51:31] will basically cascade into the final answer.
+[00:51:33] So your certainty for the final answer is low.
+[00:51:37] Now, one possibility is that you basically--
+[00:51:39] whenever you encounter unfamiliar knowledge,
+[00:51:41] you can now do web searches.
+[00:51:42] So that would be a simple scenario
+[00:51:45] of like OK, unfamiliar term, basically go and do
+[00:51:48] a tool call for search, return the document that basically
+[00:51:53] has that search tool for perhaps there is a Wikipedia page,
+[00:51:56] or there's a web page that has that information,
+[00:51:59] and put that in the reasoning chain, and now do the--
+[00:52:03] put that in the prompt, and then do the call again, and then
+[00:52:06] provide the final answer based on that.
+[00:52:08] The only challenge with this is that as you basically
+[00:52:12] increase your amount of content you're putting there,
+[00:52:14] there might be not as much relevant content
+[00:52:17] in these documents.
+[00:52:19] Like if you went and fetched like 10 documents that
+[00:52:21] were related to the information, there's
+[00:52:24] too much information for the model to process,
+[00:52:26] so it might actually not still give the correct answer.
+[00:52:28] So in this particular case, it was like 10 carbon atoms
+[00:52:32] in product 3.
+[00:52:33] Here's 14 carbon atoms.
+[00:52:34] So it still got it wrong.
+[00:52:38] What Search-o1 is proposing is that now you have--
+[00:52:41] whenever you get the unfamiliar knowledge,
+[00:52:44] it will go and search for helpful information.
+[00:52:47] So that's still a tool call to your search.
+[00:52:50] But then, it will reason within the document.
+[00:52:53] So it will try to look at these documents
+[00:52:56] and see if this is helpful information or not,
+[00:52:58] extract the relevant content, and then put it back
+[00:53:01] in the next prompt, like what is the relevant chunk
+[00:53:05] of information to put?
+[00:53:06] And that will allow the model to continue coherent reasoning
+[00:53:10] and provide the final answer here.
+[00:53:11] So in this particular case, basically,
+[00:53:13] the ability to do this summarization of information
+[00:53:17] or reason within the document really improves
+[00:53:20] the quality of life, how it gets to the final answer instead
+[00:53:23] of clustering the prompt with 10 documents or 20 documents.
+[00:53:29] Questions on what's the difference
+[00:53:31] between the three approaches?
+[00:53:36] Yes.
+[00:53:37] Why in the final leg there does it say-- in the first one,
+[00:53:40] it says--
+[00:53:41] or perhaps, it may look at as far as this little one.
+[00:53:44] Does it concern you?
+[00:53:46] Because it's been given the information.
+[00:53:48] So the uncertainty has reduced.
+[00:53:50] It has actually been-- it's not even saying that in the middle
+[00:53:53] one, which--
+[00:53:54] because it's been given the right information in the prompt.
+[00:53:59] I think the harder part is, how does it know what to search for?
+[00:54:05] It needs to know which keywords it does not know.
+[00:54:12] That's the question I would ask.
+[00:54:15] It gets to know his answer.
+[00:54:17] The answer is I think you basically
+[00:54:19] need to break down what are the key-- so there is different ways
+[00:54:23] to tackle that question, right?
+[00:54:25] If you're building a real application,
+[00:54:28] you want to identify which parts--
+[00:54:32] you don't want to rely on the knowledge base of the LLM.
+[00:54:34] And you actually do want to do a tool
+[00:54:36] call because that information is likely not
+[00:54:39] what you want to trust the weights of the LLM for.
+[00:54:43] It's almost like you're finding the key entities
+[00:54:46] in your question and fetching information on those.
+[00:54:59] OK.
+[00:55:00] So there were two things that we are covering here.
+[00:55:02] So one is the Agentic RAG, and one is Search-o1.
+[00:55:05] So I'll cover both here.
+[00:55:07] Let's first understand Agentic RAG because then,
+[00:55:10] we build on top of that in the Search-o1 process.
+[00:55:13] In Agentic RAG, what you're doing is you're basically--
+[00:55:16] every time you are hitting entities that you care about,
+[00:55:21] you're basically going to insert special tokens where you
+[00:55:24] are going to trigger a search.
+[00:55:25] And then when you get that document,
+[00:55:27] you're going to insert those results.
+[00:55:29] So model is generating some output tokens.
+[00:55:32] When it's seeing certain amount of uncertainty in its output
+[00:55:35] tokens, it's generating these search queries
+[00:55:37] between the special tokens.
+[00:55:39] And based on that, it goes and does the tool call.
+[00:55:41] And the retrieval tool will essentially
+[00:55:44] return those documents, which will then be inserted
+[00:55:46] into the reasoning chain.
+[00:55:47] So this is happening in large reasoning models
+[00:55:50] as part of the whole reasoning process of like,
+[00:55:52] it's also calling tools as part of the reasoning process.
+[00:55:56] So that's one way to solve it.
+[00:56:01] But the documents can be lengthy,
+[00:56:03] and they can contain noise.
+[00:56:05] And oftentimes, depending on how good
+[00:56:07] the long-context understanding and reasoning of the model is,
+[00:56:10] they might-- actually, if you put 10 or 20 documents,
+[00:56:13] it might actually not be able to do a good job at reasoning
+[00:56:16] over them.
+[00:56:16] So the reason in documents module of Search-o1
+[00:56:20] will allow you to do analysis of each of the documents of how
+[00:56:23] relevant the content is, and then it
+[00:56:26] considers the current query, what it was reasoning previously
+[00:56:29] plus this chunk of information that it extracted, and appends
+[00:56:34] that to the prompt to allow the model to continue
+[00:56:37] reasoning based on that.
+[00:56:39] So it's essentially a multi-step process
+[00:56:42] within that retrieval tool function itself
+[00:56:45] because it's basically getting that document information,
+[00:56:47] but then also doing an extraction process
+[00:56:49] on top of that.
+[00:56:50] It's as almost as humans.
+[00:56:52] You don't want to just go and curate
+[00:56:54] all the possible references.
+[00:56:56] You also want to take notes on those references
+[00:56:58] so that you have some way of doing a better job understanding
+[00:57:02] and synthesizing that information.
+[00:57:04] And this allows the model to do a better job at reasoning
+[00:57:08] when we are adding external knowledge.
+[00:57:10] And especially for complex queries,
+[00:57:12] this becomes quite important.
+[00:57:14] Yes.
+[00:57:15] How is it pausing previous reasoning?
+[00:57:18] And if there's any corrections needed
+[00:57:20] for the previous reasoning, how does it handle corrections?
+[00:57:23] So there is an assumption that there is a state
+[00:57:26] or there is a memory buffer that's keeping that.
+[00:57:30] It's not obvious in the way this is structured,
+[00:57:33] but there is basically some form of notion of this
+[00:57:37] is the search query I'm trying to answer
+[00:57:39] and some buffer of where is the previous reasoning and so on.
+[00:57:43] All of it in the slide.
+[00:57:44] Yeah.
+[00:57:46] Yes.
+[00:57:47] [INAUDIBLE] to prepare some new form in the Agentic RAG module.
+[00:57:53] On top of that, we just ask the model to do some summation
+[00:57:57] and then it continues reasoning.
+[00:57:59] So is that directly transferred to the second style like--
+[00:58:09] I mean, does this directly mix method
+[00:58:14] to be the new method proposed when it's due?
+[00:58:17] Say that part again, or you can just speak up louder.
+[00:58:21] I mean, if you just modify the prompt in the Agentic RAG
+[00:58:26] module, like you ask the model to do some summation
+[00:58:29] and then continue the reasoning, does that
+[00:58:33] produce the same result on recent models?
+[00:58:37] So I think that's a great question.
+[00:58:39] And I would encourage you folks to actually try that out
+[00:58:42] in homework 3.
+[00:58:43] I think the assumption there is that if you
+[00:58:45] were to issue that prompt, you are assuming that the context
+[00:58:50] length of the model and the reasoning over that context
+[00:58:53] length is working really well.
+[00:58:55] This is basically Agentic Context Engineering-style paper.
+[00:58:59] So it's basically-- there's a recent paper called "Agentic
+[00:59:02] Context Engineering."
+[00:59:03] So essentially, the limitation here
+[00:59:05] is coming from what can you put in context length
+[00:59:07] that the model is going to do a really good job at.
+[00:59:13] In ideal world, we would want that.
+[00:59:15] That's where we want to shoot.
+[00:59:17] And hopefully, by the end of the year, that's where we will be.
+[00:59:22] OK.
+[00:59:23] So let's look at the example.
+[00:59:25] So we were covering this example of carbon atom
+[00:59:27] count in product 3 based on a bunch of different chemical
+[00:59:30] reactions.
+[00:59:31] In vanilla reasoning, the challenge
+[00:59:33] was that it was guessing the structure.
+[00:59:35] So it definitely got wrong answer.
+[00:59:37] In Agentic RAG, because you were just retrieving the documents,
+[00:59:40] they ended up being too lengthy, so it did disrupt the reasoning.
+[00:59:44] In Search-o1 process, it did search
+[00:59:47] for this particular formula, and then
+[00:59:51] it refined it to a certain structure,
+[00:59:52] and then that integrated cleanly into reasoning.
+[00:59:55] So essentially, the notion of extracting the right information
+[00:59:59] from the documents really helps Search-o1
+[01:00:02] and get to the correct answer in this particular case.
+[01:00:07] Now, if you were to go beyond the example
+[01:00:09] to results, what we're plotting is different domains, physics,
+[01:00:12] chemistry, biology, and overall.
+[01:00:14] And you're plotting pass at 1 on the y-axis,
+[01:00:20] and then you're plotting the number of documents
+[01:00:23] that you get on x-axis.
+[01:00:25] So typically, as you increase the number of documents,
+[01:00:29] for direct reasoning and for RAG,
+[01:00:32] the accuracy does not go up.
+[01:00:33] But in this particular case, as you
+[01:00:35] increase the number of documents,
+[01:00:36] you are actually able to do better because you can summarize
+[01:00:40] what is relevant information or not, in this particular case,
+[01:00:43] assuming that the documents-- fetching more documents
+[01:00:45] gives you more relevant information related
+[01:00:47] to the problem that you're solving.
+[01:00:51] So this is basically another axes of--
+[01:00:54] instead of doing iterative refinement,
+[01:00:55] you can do parallel refinement because you can basically
+[01:00:58] go fetch more information and then chunk it down
+[01:01:00] to put it in the model context.
+[01:01:05] Now, if you were to compare the performance on GPQA data set--
+[01:01:13] so if you just compared GPQA data set in physics, chemistry,
+[01:01:17] and biology--
+[01:01:18] I was showing you a plot in the last slide--
+[01:01:21] human experts in physics, chemistry, and biology on GPQA
+[01:01:24] would score this much.
+[01:01:25] If you look at the reasoning models and you build Search-o1
+[01:01:28] and on top of them, what you notice is that--
+[01:01:33] for example, in physics and chemistry,
+[01:01:37] Search-o1 actually is quite competitive, sometimes
+[01:01:40] even better than what human experts would do.
+[01:01:42] These are hard problems, by the way.
+[01:01:45] And in biology, it's almost competitive
+[01:01:48] to say the biology is solving the problem.
+[01:01:52] One comment I want to make is that you
+[01:01:54] want to focus on physicists solving physics problems.
+[01:01:57] So you want to focus on the diagonal here.
+[01:01:59] It's maybe not obvious like if you change the domain then.
+[01:02:03] That's the number you're comparing to.
+[01:02:05] So the Search-o1 is doing pretty well
+[01:02:08] in physics here and in biology here, and in chemistry,
+[01:02:13] not so much.
+[01:02:15] [INAUDIBLE] this Search-o1 perform even better
+[01:02:21] than most physicists do this.
+[01:02:24] So what's the level of this physicists?
+[01:02:26] [CHUCKLES]
+[01:02:28] Maybe they didn't do a good job sourcing the physicists.
+[01:02:33] I think we're definitely getting to a point
+[01:02:35] where the models are able to do well in certain domains
+[01:02:39] more than the--
+[01:02:40] but this is not to say that you're
+[01:02:42] outperforming human experts.
+[01:02:44] It's more to say that you're competitive
+[01:02:45] with the human experts for this class of problems, yeah.
+[01:02:51] So there's still a lot of headroom in chemistry.
+[01:02:54] [CHUCKLES]
+[01:02:56] Yes.
+[01:02:57] I have a question for the chemistry.
+[01:02:59] You've seen a lot even all this chemistry
+[01:03:01] like the-- what's so fetching we should-- chemistry formula can
+[01:03:04] be wrong.
+[01:03:06] I'm just wondering whether it performed worse in the chemistry
+[01:03:09] just because the chemistry part, how to organize it
+[01:03:13] is complicated.
+[01:03:15] You want to preserve the meaning of some population, but you--
+[01:03:19] I mean, you can't just change one thing.
+[01:03:22] The pop on chemistry, like the behavior
+[01:03:25] may change dramatically.
+[01:03:27] So I'm just wondering whether it's just because-- how do you
+[01:03:30] better preserve part of the--
+[01:03:34] how to render it hopeless, I say, it's not popular.
+[01:03:38] It might be.
+[01:03:39] I will let you actually go try to evaluate on GPQA
+[01:03:42] and see if the chemistry segment--
+[01:03:45] if that hypothesis applies.
+[01:03:47] It is possible.
+[01:03:51] I mean, in every subject, when you go and from these models,
+[01:03:54] the level of expertise varies for different reasons.
+[01:03:58] It's also possible the training data set was not that strong.
+[01:04:02] So it's out of distribution.
+[01:04:05] And the other comment that I was making earlier, if you--
+[01:04:08] basically, as you increase the number of documents--
+[01:04:11] This particular technique is able to leverage the fact
+[01:04:14] that as you increase the number of documents,
+[01:04:16] you can improve the performance just because you're not just
+[01:04:21] making the context longer.
+[01:04:22] You're actually providing relevant context
+[01:04:24] from each of those documents.
+[01:04:29] The other big thing that I want to highlight
+[01:04:30] is that in multi-hop question answering,
+[01:04:32] this is particularly relevant because in multi-hop question
+[01:04:35] answering, you do tend to hit some amount of saturation
+[01:04:41] in terms of performance with standard RAG.
+[01:04:44] And even with Agentic RAG, you do
+[01:04:46] tend to hit some amount of saturation.
+[01:04:49] So in HotpotQA, in 2Wiki, MusiQue,
+[01:04:52] or Bamboogle for example, if you just did RAG, for example,
+[01:04:56] you would not hit the state-of-the-art numbers.
+[01:04:59] But with Search-o1, in a lot of these cases,
+[01:05:03] you are hitting the highest numbers.
+[01:05:05] The bolded numbers across that particular line
+[01:05:09] are coming from Search-o1 as a process.
+[01:05:12] So it is providing a lot of value,
+[01:05:14] even in the multi-hop question answering
+[01:05:16] across multiple documents.
+[01:05:18] Yes.
+[01:05:18] [INAUDIBLE]
+[01:05:22] What are the precision and recall in the retrieval system?
+[01:05:26] That's a great question.
+[01:05:28] Why did the-- precision is the-- or the retrieval
+[01:05:31] itself is above it, not the model.
+[01:05:35] So I think there is an assumption here
+[01:05:36] that you did draw at least for the way I am explaining.
+[01:05:40] I mean, it's possible that you didn't retrieve the right
+[01:05:42] documents, but if you look at the set of questions,
+[01:05:45] I think the main claim that this paper is making is that if you
+[01:05:48] find multiple relevant documents that are loosely correlated
+[01:05:51] to what you're querying about, even then,
+[01:05:53] once you put all of those documents in the context line,
+[01:05:56] then that's--
+[01:05:57] you're asking the model to do a lot in terms of reasoning
+[01:06:00] over that many documents.
+[01:06:01] So that's the claim that this particular paper is making.
+[01:06:09] So in terms of if you were to look at the takeaways here,
+[01:06:13] the gains are definitely coming from the fact
+[01:06:16] that it's able to reduce the uncertainty.
+[01:06:18] And the document quality or what you basically refine knowledge,
+[01:06:25] both of those improve.
+[01:06:26] And in the multi-turn scenario, once you can figure out
+[01:06:31] what you don't know it's able to-- even after refining
+[01:06:36] across documents, it can do this iterative loop
+[01:06:38] of improving upon that.
+[01:06:40] So it can construct better searches
+[01:06:41] over multi-turn scenarios.
+[01:06:43] So in this particular case, the reasoning quality
+[01:06:47] improves substantially because you're
+[01:06:49] providing more relevant documents,
+[01:06:51] and then you're also figuring out
+[01:06:52] where the uncertainty is over multiple steps.
+[01:06:55] So effectively, you have the right documents.
+[01:06:59] And then you can correct yourself
+[01:07:00] because when you put the documents in there, if you're
+[01:07:03] still seeing uncertainty, then you have additional searches
+[01:07:06] to go for.
+[01:07:07] So there were some numbers that the paper
+[01:07:09] gives of the number of perhaps or wait or likely.
+[01:07:13] Basically, anything that quantifies uncertainty
+[01:07:15] in the reasoning chains goes down substantially
+[01:07:18] in this particular approach.
+[01:07:19] So they're basically analyzing the reasoning chains
+[01:07:21] of the model.
+[01:07:24] So just to summarize what we covered
+[01:07:27] here is that when we are building doing deep research
+[01:07:33] agents on top of, say, the large reasoning models, that's
+[01:07:37] a very effective way to bridge the knowledge
+[01:07:39] gaps that exist in large language models.
+[01:07:41] But just doing simple retrieval augmented
+[01:07:44] generation is often not enough.
+[01:07:46] And even with just fetching the documents, using tool calls
+[01:07:50] is not enough.
+[01:07:51] You need to be able to do that effectively over multiple turns,
+[01:07:54] and then identify the relevant information to refine
+[01:07:57] which set of documents to keep.
+[01:07:59] So the large reasoning models by themselves
+[01:08:03] often don't do a good job in scaling
+[01:08:06] well if you put a lot of documents in there.
+[01:08:08] So this particular approach allows you to improve on that.
+[01:08:12] And larger models often do better.
+[01:08:15] And then-- OK, there's another paper that I wanted to cover,
+[01:08:19] but I didn't end up covering.
+[01:08:21] So the Search-R1 stuff effectively
+[01:08:24] varies from Search-o1 in that it teaches the model how to go
+[01:08:28] search in an automatic way.
+[01:08:29] So what I wanted to say here was that Search-R1 versus Search-o1.
+[01:08:34] Search-o1 is closing the loop with a prompting-based approach.
+[01:08:38] Search-R1 can actually teach the model
+[01:08:40] to do this with a reinforcement learning-based loop.
+[01:08:45] We will not cover this paper today
+[01:08:48] because we are basically at the end,
+[01:08:49] but it's worth going and taking a look at that paper.
+[01:08:56] Questions?
+[01:08:58] Yes.
+[01:08:59] I was just following this poster during the definition
+[01:09:02] of a language model.
+[01:09:03] So when we generate an answer, are we
+[01:09:07] supposed to have the ability to put
+[01:09:09] a probability of that answer?
+[01:09:13] And I'm just wondering that when we have this,
+[01:09:15] let's say 1,000 generations, each generation have a different
+[01:09:23] probability, or at least in some extent.
+[01:09:26] And has there been some correlation
+[01:09:29] between the right answers and the probabilities, or they are--
+[01:09:34] by definition, they are also a bit uncorrelated.
+[01:09:37] And also, same question to RAG, there's got to be--
+[01:09:44] I have a RAG augmented generation.
+[01:09:49] I can imagine that some of the-- maybe it
+[01:09:52] messes up some of the definition.
+[01:09:54] Is there any difference in the probability of the answer?
+[01:10:01] I mean, that's a great experiment to go do.
+[01:10:03] So let me answer the first question.
+[01:10:05] And the second question, you will
+[01:10:07] have to go experiment yourself.
+[01:10:09] So in the first question, typically-- so there's
+[01:10:12] a lot of studies, but if you were to just take the output
+[01:10:15] generation and compute the log probabilities of the output
+[01:10:18] tokens and aggregate them in some meaningful way,
+[01:10:22] not just sum them, you'll have to do
+[01:10:23] some averaging or some geometric product or something.
+[01:10:26] What you'll find is that the models tend to be overconfident
+[01:10:31] about what they--
+[01:10:33] overconfident, so if you were to calibrate that
+[01:10:35] to the right answer, often you'll
+[01:10:37] find that the correctness is--
+[01:10:41] Like if it's 50% correct, it will still be overconfident.
+[01:10:44] It'll be like 80% very confident that this is correct.
+[01:10:47] And this shows up in the ways in which
+[01:10:50] if you try to correct the model outputs,
+[01:10:52] it will sometimes be pretty strong in like, no,
+[01:10:55] this is the right answer and will not change its mind.
+[01:10:58] So in some ways, the model outputs do tend--
+[01:11:02] have exhibited not high calibration
+[01:11:06] and are more on the overconfident side.
+[01:11:09] And there have been research to try
+[01:11:11] to get the model to estimate the confidence, say
+[01:11:13] in a second pass or in a--
+[01:11:17] and try to do RL or RLHF on top of that to get the model
+[01:11:22] to calibrate and do things so that it doesn't actually
+[01:11:27] emit answers that it has low confidence over.
+[01:11:29] So there has definitely been efforts in that direction.
+[01:11:33] Different models exhibit different behaviors.
+[01:11:35] We don't know which lab did what.
+[01:11:38] So we just get these notions of oh, the model is hallucinating.
+[01:11:43] There is no correlation between the actual right answer both
+[01:11:46] from the 1,000 and the--
+[01:11:49] I think there is a correlation in that
+[01:11:51] if the answer is correct, then the model will likely
+[01:11:55] get it correct.
+[01:11:56] But if the answer is incorrect, the model
+[01:11:58] might be overconfident in feeling
+[01:11:59] that it knows the answer.
+[01:12:01] That's been the observed pattern,
+[01:12:04] but I think this is worth studying.
+[01:12:07] The hallucinations in just the ability
+[01:12:10] of the model to know what they know
+[01:12:12] is an active area of research.
+[01:12:15] And it's actually a great set of research projects
+[01:12:19] if someone wants to pursue it.

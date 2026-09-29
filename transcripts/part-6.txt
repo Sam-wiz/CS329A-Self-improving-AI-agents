@@ -1,0 +1,1583 @@
+[00:00:05] Welcome, everyone, to the sixth lecture for CS320A.
+[00:00:09] We'll today cover train time scaling or scaling RL.
+[00:00:13] So far, we have gone through several topics related
+[00:00:15] to test time scaling, feedback using tools and code,
+[00:00:22] and then also robust verification.
+[00:00:24] Today, we will see how we can close the loop
+[00:00:27] to improve the models even further.
+[00:00:30] OK.
+[00:00:30] So today's lecture, we will actually cover three papers.
+[00:00:34] The first paper will cover how can you
+[00:00:37] boost the reasoning capabilities of the models
+[00:00:40] with putting rationales in problems.
+[00:00:44] This paper is called STaR.
+[00:00:46] It was actually done by an author at Stanford.
+[00:00:50] The second paper we will cover is DeepSeek math,
+[00:00:52] which talks about mathematical reasoning
+[00:00:54] and how that can be boosted in language models.
+[00:00:58] And then the third paper is more focused
+[00:01:00] on reinforcement learning and how when
+[00:01:02] you have to do reasoning with long reasoning chains, how can
+[00:01:06] you stabilize that kind of reinforcement learning
+[00:01:08] algorithms.
+[00:01:11] So to motivate a lot of the papers
+[00:01:16] that we'll present today, if you look at a benchmark called AIME,
+[00:01:20] so AIME is a benchmark, which is on mathematical problems, which
+[00:01:26] tests for mathematical reasoning.
+[00:01:30] It's more complex mathematical reasoning problems than say,
+[00:01:34] what was in a math benchmarks.
+[00:01:36] We used math benchmarks earlier this year,
+[00:01:39] and then that one is already saturated and contaminated
+[00:01:43] in most of the models.
+[00:01:44] Basically, most of the models have been trained on it.
+[00:01:46] So we had to change the benchmark.
+[00:01:48] So this is AIME 2024 and AIME 2025,
+[00:01:51] the benchmark that you use in homework 1.
+[00:01:54] Is a recent benchmark that has mathematical reasoning problems.
+[00:01:59] And if you were to evaluate GPT-3.5,
+[00:02:02] which is a 175 billion parameter model, you would get--
+[00:02:06] or that's what it's believed to be, you get almost 5% accuracy.
+[00:02:10] But if you were to take DeepSeekMath,
+[00:02:13] which was using train time scaling on 7B model,
+[00:02:17] it gets 51.7% accuracy, and with additional tricks,
+[00:02:22] it's able to even get 60% accuracy.
+[00:02:25] And if you apply the third paper that I will talk about called
+[00:02:29] DAPO on the Qwen-32B model, you are able to get 50% accuracy.
+[00:02:35] So in the prior work or in the first lecture,
+[00:02:39] we were saying that as we scale the number of parameters
+[00:02:44] in the model, that's when the model capabilities go up.
+[00:02:47] The model accuracy on benchmarks go up.
+[00:02:50] But what we are seeing in this particular slide
+[00:02:52] is that you can achieve a pretty high performance on reasoning
+[00:02:55] benchmarks with smaller models.
+[00:02:57] So how did these smaller models get really performant?
+[00:03:00] How did they get really high accuracy?
+[00:03:02] So that's something that we will explore
+[00:03:04] in this particular lecture.
+[00:03:07] And some of the tricks that are being used to achieve this
+[00:03:11] are called train time scaling.
+[00:03:13] So typically, if you try to do reinforcement
+[00:03:16] learning on reasoning, it will not work well.
+[00:03:18] And a lot of the times, the reason it doesn't work well
+[00:03:21] is because the implementation details are hard to get right.
+[00:03:25] So the key insights that we will study today
+[00:03:29] are that if you have a model, earlier,
+[00:03:32] you were just training it on internet.
+[00:03:34] So pre-training, the technique of model training,
+[00:03:37] was training the model on internet.
+[00:03:40] If you allow the model to learn from their own outputs
+[00:03:43] by filtering cleverly, you can improve the models even further,
+[00:03:47] hence the class is called self-improving AI agents class.
+[00:03:51] And then the amount of compute you
+[00:03:54] invest in training the model on its own outputs
+[00:03:56] can substitute for the model parameters.
+[00:03:59] This also parallels some of the earlier efforts
+[00:04:01] where the amount of compute used in training smaller models,
+[00:04:06] if you could increase the amount of data,
+[00:04:07] has been shown to help improve certain benchmarks.
+[00:04:11] And then the third point is that when
+[00:04:12] you're doing reinforcement learning, as opposed
+[00:04:15] to supervised learning, you have to really be careful
+[00:04:17] about details of the implementation,
+[00:04:20] because as you scale up those algorithms,
+[00:04:23] the small fixes can be extremely important.
+[00:04:25] So the three paradigms that I'm talking about here
+[00:04:28] are pre-training, which is basically
+[00:04:30] training the model on internet that we have talked
+[00:04:34] about in the first lecture.
+[00:04:35] And we're not covering that much in detail.
+[00:04:38] And then the next technique would be that fine-tuning,
+[00:04:40] which is how you get your chatbots,
+[00:04:42] where you're basically perhaps fine-tuning or doing
+[00:04:44] reinforcement learning with human feedback
+[00:04:46] or RLAIF on preference data from humans.
+[00:04:51] And then the test time scaling, which
+[00:04:53] was some of the techniques that were
+[00:04:54] covered in previous lectures.
+[00:04:56] Those are more techniques where you're basically
+[00:04:58] doing some sort of say, majority voting or inference time
+[00:05:02] sampling, and then combining the outputs
+[00:05:04] from how you sample from the model.
+[00:05:07] For example, in homework 1, you are evaluating majority voting.
+[00:05:11] Then you are evaluating some other techniques
+[00:05:14] that combine and evaluate the errors in what the model is
+[00:05:18] producing and then using that to improve the model.
+[00:05:21] So test time scaling is mostly inference-based techniques.
+[00:05:24] Now, if you take what the model output filter
+[00:05:27] after applying this test time scaling
+[00:05:29] and then use that to fine-tune further,
+[00:05:32] that's roughly what train time scaling is.
+[00:05:34] So if you take nothing away from this entire lecture,
+[00:05:36] but you just remember this loop, then
+[00:05:38] you have learned the basics of what train time scaling does.
+[00:05:43] Questions.
+[00:05:47] How do you know what is the good balance
+[00:05:50] to distribute your compute into training time scaling
+[00:05:52] versus test time scaling?
+[00:05:54] Is there a flat ROI curve that you reach at a certain point
+[00:05:59] after investing in training time?
+[00:06:01] I mean--
+[00:06:02] Great question.
+[00:06:04] Let's hold that question until the third paper.
+[00:06:08] Cool.
+[00:06:09] But definitely ask that question again.
+[00:06:13] So roughly, what happened last year
+[00:06:15] was that the reasoning model, this is a graph on o1 and o1's
+[00:06:21] accuracy on AIME on the pass@1 accuracy on the y-axis,
+[00:06:26] and then the amount of compute on x-axis and train time
+[00:06:29] is shown on the x-axis, on the left graph,
+[00:06:33] and test time compute is shown on the x-axis
+[00:06:35] on the right-hand plot.
+[00:06:37] So what is happening here is that as we are increasing
+[00:06:40] the test time compute that we have already seen,
+[00:06:42] the pass@1 accuracy should go up.
+[00:06:44] So this is a log linear plot, and so more inference time
+[00:06:48] compute better pass@1 accuracy.
+[00:06:50] But what they're also showing is that if you
+[00:06:52] can increase the train time compute,
+[00:06:54] then you can also improve pass@1 accuracy.
+[00:06:57] So what o1 showed for AIME benchmark was that
+[00:07:00] by increasing both the train time compute and the test time
+[00:07:05] compute, you are able to improve the accuracy on the benchmark.
+[00:07:10] So it allows you for basically a circular loop
+[00:07:13] where you can generate model outputs
+[00:07:15] and then feed them back to improve the model
+[00:07:17] on this particular benchmark.
+[00:07:19] Now, why does this work?
+[00:07:20] So math is a domain in which there is verifiability.
+[00:07:23] So we had a whole lecture on robust verification.
+[00:07:26] So you have the ability to know which outputs are correct,
+[00:07:28] and which ones are not correct.
+[00:07:30] So you have some ability to actually choose
+[00:07:32] the correct outputs that can then
+[00:07:34] feed into train time scaling.
+[00:07:35] So this works better in domains where there is verifiability.
+[00:07:40] So typically, why does reasoning start to help?
+[00:07:44] So this is a repeat of some of the slides,
+[00:07:47] but I think it's very important to remind
+[00:07:49] folks that all the reasoning models in all series
+[00:07:52] are of Gemini flash thinking, or the equivalents
+[00:07:55] in other frontier labs.
+[00:07:57] Basically, reasoning allows us to solve for difficult problems,
+[00:08:00] because when you're solving a difficult problem,
+[00:08:02] you will not just spit out the output,
+[00:08:04] even in chain of thought and math problems.
+[00:08:06] When you were asking the model to think step by step,
+[00:08:09] it allowed a certain amount of tokens
+[00:08:10] to be dedicated to spelling out the reasoning
+[00:08:14] and step by step process.
+[00:08:15] So thinking models use a chain of thought
+[00:08:17] where when they're attempting to solve the problem,
+[00:08:20] and what these tokens might get dedicated to is,
+[00:08:22] you will see patterns like problem analysis,
+[00:08:24] where they might actually try to understand
+[00:08:26] what the problem is describing.
+[00:08:28] Task decomposition.
+[00:08:30] I'll show you an example of this where
+[00:08:32] they try to decompose the task into sub-tasks.
+[00:08:36] Self-evaluation.
+[00:08:37] They might actually try to look at the answer,
+[00:08:40] and then be like, OK.
+[00:08:41] This is not looking correct.
+[00:08:43] So they might actually choose to backtrack and recognize
+[00:08:47] their own mistakes, and then backtrack to a previous step
+[00:08:50] where they redo the problem.
+[00:08:52] And they might try some kind of different approaches.
+[00:08:57] So it's like a somewhat parallel search
+[00:08:59] where they might actually try multiple approaches
+[00:09:01] at the same time, instead of if the current one is not
+[00:09:04] leading to a solution.
+[00:09:05] So it needs to have some sense of whether it's
+[00:09:07] the correct solution or not.
+[00:09:08] So here are some examples from actually
+[00:09:12] a earlier version of the model in o1 series.
+[00:09:16] So here, the user is requesting a batch script,
+[00:09:19] where it wants to understand--
+[00:09:21] it's requesting a batch script that
+[00:09:23] will represent a string with this format
+[00:09:25] and print out the transpose in the same format.
+[00:09:28] So it's taking a matrix and printing the transpose.
+[00:09:32] And what you see in the output is that the model first
+[00:09:37] tries to understand what the user is asking in terms
+[00:09:40] of input and output formats before it
+[00:09:42] tries to solve the problem.
+[00:09:44] So that's more of a problem analysis kind of pattern.
+[00:09:47] Another example for the same problem you see
+[00:09:49] is that it tries to decompose the problem.
+[00:09:52] So it will actually-- once it understood
+[00:09:54] the problem, it's saying that the approach should involve--
+[00:09:56] maybe I should parse the input string, then build a matrix,
+[00:09:59] transpose the matrix, and then output the matrix
+[00:10:02] in the same format.
+[00:10:03] So it's breaking it into multiple steps.
+[00:10:06] For this particular problem, this might be an overkill,
+[00:10:08] but in more complex problems.
+[00:10:10] This might be a better way to solve
+[00:10:11] the problem because you decompose
+[00:10:13] the problem into smaller steps.
+[00:10:15] And then self-correction.
+[00:10:17] So this is a different problem from chemistry,
+[00:10:19] where it's asking pH of some solution on a chemical
+[00:10:23] and the model starts to compute the pH value,
+[00:10:28] but then it suddenly has this notion of wait,
+[00:10:32] the correct formula is different.
+[00:10:33] So it basically goes and changes the formula
+[00:10:35] that it was going to use.
+[00:10:37] So even though it's pulling from the knowledge
+[00:10:39] that the model already has, it's actually correcting itself.
+[00:10:42] So it has the capability of self-correction.
+[00:10:45] And how does this help the model?
+[00:10:48] So as I was trying to explain before,
+[00:10:50] in domains where you have verification like computer
+[00:10:52] programming or data analysis or mathematical calculation,
+[00:10:57] the win rate over GPT-4o, which was not a thinking model,
+[00:11:01] you'll see that it's greater than 50%.
+[00:11:03] So certain domains benefit way more
+[00:11:06] from this train time scaling kind of techniques
+[00:11:10] as opposed to if you look at personal writing or editing
+[00:11:13] text, there's not as much improvement in terms
+[00:11:15] of win rate.
+[00:11:16] Win rate means if you were to give humans
+[00:11:18] output from GPT-4o versus thinking models,
+[00:11:21] personal writing and editing text may not see as much gains,
+[00:11:24] but domains which have the ability to verify and close
+[00:11:28] the loop see more gains.
+[00:11:30] Questions?
+[00:11:31] Can you go back to help pages for us
+[00:11:34] to compute [INAUDIBLE] So for that is a train
+[00:11:42] pattern [INAUDIBLE] 0 times.
+[00:11:48] It seems that this time performance
+[00:11:51] is better than the train pattern because all the writing seems
+[00:11:55] [INAUDIBLE] on the right.
+[00:11:57] On the left that is not [INAUDIBLE].
+[00:11:59] So in this case, the [INAUDIBLE] performance
+[00:12:02] increased better than the train performance.
+[00:12:04] So in this particular plot, it does look like that.
+[00:12:08] But that's kind of--
+[00:12:10] There is no intuition around these things as to like one
+[00:12:12] should be better than the other, I mean.
+[00:12:15] This is one instantiation of where things were,
+[00:12:18] and I just wanted to show you the curve.
+[00:12:20] It seems to me like test-time performance better than
+[00:12:23] train-time performance--
+[00:12:24] Mhm.
+[00:12:25] That means something suspicious is going on.
+[00:12:27] Something suspicious is going on, OK?
+[00:12:29] I copied the plot.
+[00:12:31] So the graphs are not always right,
+[00:12:33] as you might know from their latest release.
+[00:12:35] OK.
+[00:12:37] [LAUGHTER]
+[00:12:39] OK.
+[00:12:40] So let's go back to the fundamentals, right?
+[00:12:42] So what is it that we're trying to answer?
+[00:12:43] I think the fundamental question we're trying to answer
+[00:12:46] is that in test-time compute, you can basically if you go back
+[00:12:49] to this plot, test-time compute is very cheap for someone
+[00:12:52] to put, because you've trained a model,
+[00:12:55] and then you can go and do multiple inferences.
+[00:12:57] And if one of the answers is correct
+[00:12:59] and you have a good verifier on your end,
+[00:13:01] then you can basically scale compute infinitely.
+[00:13:04] In fact, I think next Friday, I'll go through some papers,
+[00:13:08] including [? AlphaCode ?] for example.
+[00:13:10] And what you will find there is that if you can basically
+[00:13:14] make your search infinite in some ways,
+[00:13:16] then in test-time you basically have a solution that will be
+[00:13:19] correct, because from test-time scaling,
+[00:13:21] we do know that there is a correct solution if you
+[00:13:23] repeatedly sample, right?
+[00:13:26] Train-time scaling the challenge will
+[00:13:28] be that you have to scale it correctly, which
+[00:13:30] we'll cover in this lecture.
+[00:13:32] And then the second bit is that there's
+[00:13:34] a certain amount of this closed feedback
+[00:13:36] loop has to have enough successes
+[00:13:38] for the train-time scaling to work well.
+[00:13:41] So you will see that in the papers that I will present now.
+[00:13:45] So that is actually different in the traditional machine learning
+[00:13:49] to compare between the performance--
+[00:13:50] test that performance, because that [? graph ?] is showing it
+[00:13:53] exactly more efficient if you cross the compute it
+[00:13:56] to the [? past, ?] because one test-time compute increases
+[00:13:59] the accuracy increase.
+[00:14:02] Like given the same compute to test, essentially,
+[00:14:05] you have better performance.
+[00:14:07] So there is a caveat to what you're saying.
+[00:14:10] Test-time compute works well in benchmarks where
+[00:14:15] the verifiability is robust.
+[00:14:16] OK.
+[00:14:19] Otherwise, you do need to get the model
+[00:14:20] to start to reason better, and you need some verification loop.
+[00:14:24] So both serve there--
+[00:14:27] I mean, this is something we'll discuss in the lecture,
+[00:14:29] but both serve their goals.
+[00:14:30] So if you prefetch what I'll present
+[00:14:32] by the end of the lecture, when you look
+[00:14:35] at a pre-trained model, what it is good at
+[00:14:38] is it has a certain level of capability in, say,
+[00:14:40] solving mathematical problems and solving reasoning problems
+[00:14:43] and reasoning about finance or legal
+[00:14:46] or whatever based on whatever domains it has seen already data
+[00:14:49] in.
+[00:14:50] But then in inference time, you're
+[00:14:53] basically getting it to reason over multiple of these traces
+[00:14:55] and then picking one.
+[00:14:56] If you know and have a good way to verify the solutions,
+[00:14:59] then you can pick one of the solutions.
+[00:15:01] That's like saying, I'm going to throw spaghetti at the wall,
+[00:15:04] and I know where it should land.
+[00:15:07] Otherwise, with train-time scaling, you can teach the model
+[00:15:10] and boost the path at 1 accuracy so that there's more likelihood
+[00:15:14] that it will emit the correct output,
+[00:15:16] but you still need verification of the loop.
+[00:15:20] More questions?
+[00:15:24] Yes
+[00:15:25] So when you're fine tuning the model
+[00:15:27] to be able to solve difficult problems better,
+[00:15:31] does it have any regression on solving simpler problems?
+[00:15:34] And if so, how do you prevent that?
+[00:15:37] That one also needs doing.
+[00:15:38] Let's keep those questions.
+[00:15:40] I like all the questions, but we need to get to the first paper
+[00:15:44] and then we can ask that one.
+[00:15:48] Typically, there shouldn't be a regression
+[00:15:50] on solving easy problems if you're
+[00:15:54] solving difficult problems, unless you're basically
+[00:15:56] go into reasoning chains that are completely
+[00:15:59] broken in some way.
+[00:16:01] So repetitive reasoning chains, which is called as overthinking.
+[00:16:08] So let's cover the first paper first,
+[00:16:11] where we are basically teaching the model how to reason.
+[00:16:14] So we are boosting the reasoning capability of the model
+[00:16:17] with reasoning chains.
+[00:16:20] So let's take a look at how we can do that.
+[00:16:24] So we already covered this earlier,
+[00:16:27] and we showed this in the first lecture.
+[00:16:30] So chain-of-thought in large language models
+[00:16:32] provides both interpretability, and if you
+[00:16:34] ask the model to show its work step by step,
+[00:16:37] then provides boost mathematical reasoning.
+[00:16:40] And we saw several benchmarks common sense reasoning
+[00:16:42] and so on.
+[00:16:43] So we want to basically get the model
+[00:16:45] to have strong step-by-step reasoning capabilities
+[00:16:49] along solving any problem.
+[00:16:52] What is challenging with existing approaches,
+[00:16:54] if you were to try to get this in existing approaches,
+[00:16:57] so no internet scale data has really reasoning steps
+[00:16:59] most of the time.
+[00:17:00] There are very few internet sources
+[00:17:02] that have the large-scale reasoning steps.
+[00:17:04] And then if you try to manually annotate reasoning steps,
+[00:17:07] that's very expensive because you literally
+[00:17:09] need humans to annotate those reasoning steps.
+[00:17:12] And if you try to automate this process of generating reasoning
+[00:17:16] based on known solution patterns,
+[00:17:18] then that also works only in very, very specific domains.
+[00:17:23] And then if you try to few-shot prompt-- few-shot prompting
+[00:17:26] means if you give it a few examples of here is a problem,
+[00:17:30] here is a reasoning chain, here is
+[00:17:31] an answer, then that still underperforms
+[00:17:34] models that can be fine tuned on just larger data sets.
+[00:17:38] So basically, small amount of reasoning examples
+[00:17:42] don't quite cut it, and you can just
+[00:17:43] have a larger data set without reasoning chains.
+[00:17:46] So the key insight that STaR has is very simple.
+[00:17:53] This is a very simple example.
+[00:17:54] It will start with a small number of examples,
+[00:17:57] that is reasoning steps.
+[00:17:59] It will generate solutions.
+[00:18:01] So say 10k problems.
+[00:18:02] 10k is a representative number.
+[00:18:05] And then it will only keep the ones that have correct answers,
+[00:18:08] but it will generate these problems with rationale.
+[00:18:11] And it can fine tune on those, and it can repeat.
+[00:18:13] So it can repeat this loop.
+[00:18:14] So this what's new here compared to what
+[00:18:16] we were doing in test time scaling
+[00:18:18] is it's only keeping the ones that have correct answers.
+[00:18:21] Now, why did it not produce correct answers
+[00:18:23] on the other ones, and what can we
+[00:18:25] do with those particular set of examples?
+[00:18:27] So that's the other interesting bit.
+[00:18:29] So in certain problems where it could not solve the problem,
+[00:18:32] the model got stuck.
+[00:18:33] So what we want to do is we basically, if we just fine
+[00:18:37] tune on the correct examples, the model
+[00:18:39] is not able to learn how to solve new problems.
+[00:18:42] Let me cover this slide, and then we can come back.
+[00:18:45] So there's basically no signal.
+[00:18:47] So what we do is we give the model the answer
+[00:18:50] and ask it to explain backwards.
+[00:18:51] So it's almost like I have this question, I ask the model
+[00:18:55] to produce the answer, but now the model did not
+[00:18:57] produce the correct answer.
+[00:18:58] So I give the model the answer, and then I
+[00:18:59] ask you to produce the rationale.
+[00:19:01] So, for example, the answer is 42 the human says.
+[00:19:04] And then the model generates the reasoning.
+[00:19:06] And then you can fine tune the model on, again, the problem
+[00:19:11] rationale and the answer, but don't show it the hint as
+[00:19:14] if it was solved directly.
+[00:19:16] So this helps you expand the training set to include
+[00:19:18] more difficult problems now.
+[00:19:20] So basically, it allows you to bootstrap
+[00:19:23] the reasoning capabilities and not just,
+[00:19:26] say, limited to easy problems that the model
+[00:19:29] could solve earlier, but now you can bootstrap it iteratively.
+[00:19:32] So you basically generate reasoning attempts.
+[00:19:34] You learn from successful reasoning paths
+[00:19:36] where the quality of the reasoning paths
+[00:19:38] is entirely based on things being correct.
+[00:19:41] And for failed attempts, you're basically rationalizing them
+[00:19:45] by saying, OK, here is a hint.
+[00:19:47] Please generate the rationale.
+[00:19:48] And then you're using these generated rationales
+[00:19:51] as the training data.
+[00:19:52] So that's basically the algorithm that they use in STaR.
+[00:19:55] It's very bare bones, and like you can almost
+[00:19:58] call it an off-policy reinforcement learning
+[00:20:00] technique.
+[00:20:00] It's a very bare bones way of producing reasoning techniques
+[00:20:05] in a model.
+[00:20:07] And the assumption that is being made in this particular case
+[00:20:10] is that how do you know something is a good rationale?
+[00:20:13] They're assuming that if the model output is correct,
+[00:20:16] which in math they found that was generally true,
+[00:20:19] the correctness of the final output
+[00:20:21] is a proxy for the reasoning quality.
+[00:20:23] So they're filtering incorrect answers.
+[00:20:25] Basically, they're assuming that will be filtering out
+[00:20:29] lower quality reasoning chains, but there
+[00:20:30] might be scenarios where they're not
+[00:20:33] learning from incorrect reasoning chains as a result.
+[00:20:37] But they get higher quality training data.
+[00:20:39] And then the second bit is that they assume that the language
+[00:20:43] model can generate valid reasoning paths when it's
+[00:20:46] given the answer as a hint.
+[00:20:47] So it assumes that if I show the model the answer
+[00:20:50] and then ask it to show its work, it will be able to do so.
+[00:20:53] And then finally, there is some amount of assumption
+[00:20:57] that the initial language model is strong enough
+[00:20:59] to bootstrap from few short examples.
+[00:21:02] So if the class of problems is way outside
+[00:21:04] the capability of the initial language model,
+[00:21:06] then it will not make much progress on this.
+[00:21:09] And this is where the iterative aspect
+[00:21:11] starts to become important.
+[00:21:13] I was seeing a couple of hands, so let's take them one by one.
+[00:21:17] Yeah, I was just wondering, so do they
+[00:21:19] start with a math data set that has the correct answer?
+[00:21:24] It just doesn't have reasoning, right?
+[00:21:25] Like that's how they know what the correct answer is.
+[00:21:27] Yes.
+[00:21:28] OK.
+[00:21:29] Because I was like, how do they know the correct answer?
+[00:21:31] Yeah, everyone is starting with a benchmark basically.
+[00:21:35] Yes.
+[00:21:35] Is there filtering that happens for step three?
+[00:21:39] Like, are we worried that we give the correct solution,
+[00:21:42] and then there's issues in the reasoning
+[00:21:44] just to get to that solution?
+[00:21:46] So they actually don't filter in step three,
+[00:21:48] but there are follow-on papers that do filter in step three.
+[00:21:52] I mean, you can do some sort of process-reward model
+[00:21:54] on top of the reasoning chains, and then say which of the steps
+[00:21:57] makes sense or which of the steps don't make sense.
+[00:21:59] But this particular paper was one of the first.
+[00:22:01] I mean, one of the attempts in this class
+[00:22:04] is to show you papers as they evolved as opposed to what's
+[00:22:08] the latest paper here.
+[00:22:10] But yes, you can--
+[00:22:11] that might be another project idea
+[00:22:13] of how do you evaluate the quality of the reasoning chains
+[00:22:16] if you don't want to depend on just the final outcome
+[00:22:18] as the proxy for correctness.
+[00:22:23] Yes.
+[00:22:24] So the problem is too [INAUDIBLE]
+[00:22:27] it fails as a pattern.
+[00:22:29] Even if you tell the model the right answer,
+[00:22:33] it's tests do not do well, because it's just
+[00:22:36] too complicated to look at the model.
+[00:22:39] That's a great question.
+[00:22:40] So, as I told you in step four, the assumption
+[00:22:44] is being made that the benchmark on which this is being done
+[00:22:48] is essentially where the problem is not too difficult.
+[00:22:53] It is within range, or some subset of the problems
+[00:22:56] are within range of the language model.
+[00:23:00] And typically you can--
+[00:23:03] so that is an assumption that is made.
+[00:23:06] And then when you do iteratively,
+[00:23:07] the model might get better at certain point
+[00:23:09] that it can start handling these other problems.
+[00:23:13] I have a question in step three.
+[00:23:15] So in the NLP like [INAUDIBLE] direction.
+[00:23:24] So I'm just wondering, is there a possibility
+[00:23:26] that you can know from the step two [INAUDIBLE].
+[00:23:30] And in step three [INAUDIBLE] you just use [INAUDIBLE]
+[00:23:41] So that's a great point.
+[00:23:43] Let's come back to that one.
+[00:23:44] So I think what I'll show you by the end
+[00:23:46] of the lecture is that learning from negative examples
+[00:23:49] has not been nailed.
+[00:23:50] Learning from positive examples has been.
+[00:23:52] Like, if you have any non-zero reward,
+[00:23:54] then you have an ability to close the reinforcement learning
+[00:23:58] loop, which is not happening yet in this particular set
+[00:24:01] of examples.
+[00:24:02] So you do need to be able to close the loop in some way.
+[00:24:07] So if you have negative examples,
+[00:24:10] there are some papers that have tried to learn from it,
+[00:24:12] but that's not something we'll cover today.
+[00:24:16] Yes.
+[00:24:17] I have a similar question worrying
+[00:24:19] how to evaluate or verify the quality
+[00:24:22] of the generated rationales on this failed attempts
+[00:24:26] after giving the hints, like since the model already
+[00:24:29] know the answer, but it might generate incorrect reasoning
+[00:24:36] that leads to [INAUDIBLE].
+[00:24:37] So that's a great problem too.
+[00:24:39] So you're saying that in step three
+[00:24:43] it might generate wrong rationales is
+[00:24:45] what you're saying?
+[00:24:46] Yeah.
+[00:24:47] Then it will learn wrong reasoning from correct attempts.
+[00:24:51] Yes, that will be a problem.
+[00:24:53] In this particular case, they don't have any further filtering
+[00:24:57] on top of rationales.
+[00:25:00] So there would be no way to hill climb in that case.
+[00:25:04] You can have humans look at the reasoning chains.
+[00:25:08] It could be tedious, yes.
+[00:25:13] OK.
+[00:25:13] So going through this in a little bit more rigorous detail.
+[00:25:17] So you start with a prompt data set
+[00:25:19] where you have the questions, the rationales, and the answers.
+[00:25:22] This prompt data set will be small,
+[00:25:24] and compare it to the amount of data that we want to train on.
+[00:25:29] For example, this is the multiple choice questions.
+[00:25:32] Where do you put your grapes just before checking out?
+[00:25:34] There's a rationale, and then the correct answer
+[00:25:36] is for example B, which is grocery cart.
+[00:25:39] Now, you have a training data set
+[00:25:41] which is quite large of examples that have questions and answers.
+[00:25:45] This would be, say, if you have a benchmark,
+[00:25:47] you might have a trained subset of the benchmark and a test
+[00:25:50] subset of the benchmark.
+[00:25:52] And what Vanilla STaR will do is it
+[00:25:54] will start with this rationale data set and training data set.
+[00:25:57] So it will first few-shot prompt the model with the rationales
+[00:26:00] in the Rationale data set.
+[00:26:02] And then it will get the model to produce the rationales
+[00:26:06] and the correct output.
+[00:26:09] So this is on the training data set.
+[00:26:10] So now it's few-shot prompting, but it's supplying questions
+[00:26:15] from the training data set, and it's
+[00:26:17] checking if the answers are correct by the language model.
+[00:26:20] And it will collect these set of rationales that it can use,
+[00:26:25] and then it can fine tune the language model
+[00:26:27] on these correct solutions.
+[00:26:29] If you have a rationalization, which is what STaR does,
+[00:26:33] if the answer is incorrect, what you will do
+[00:26:36] is you will add hint.
+[00:26:37] So you'll be saying, OK, here is the correct answer,
+[00:26:40] and you will essentially generate the rationale
+[00:26:43] by looking at this hint, and then
+[00:26:45] you will use that to add to that data set of rationales
+[00:26:49] that led to the correct answer.
+[00:26:50] And then you can fine tune on top of that language model.
+[00:26:53] And so you basically have these two sets of rationales
+[00:26:57] that then you can fine tune on top of this language model,
+[00:27:00] and you can do this process iteratively.
+[00:27:01] So you don't do it just once.
+[00:27:03] You fine tune it.
+[00:27:04] Now the language model perhaps is
+[00:27:06] able to produce better reasoning chains.
+[00:27:08] So now you can, again, start with your training data set,
+[00:27:10] and whatever was not correct, you can redo this process.
+[00:27:14] So their experiments were on a small model,
+[00:27:17] which is an open source of GPT-3, a 6 billion
+[00:27:20] parameter model called GPT-J. They had a pretty small warm-up,
+[00:27:24] and then they kept a constant learning rate,
+[00:27:26] and then they basically had certain number of iterations
+[00:27:29] of the outer loop.
+[00:27:30] And then they increased the number
+[00:27:33] of steps in the inner loop on each step.
+[00:27:35] So one of the comments the paper makes
+[00:27:38] is that they want to have a slower start in the training
+[00:27:42] time, and then they want to slowly increase
+[00:27:44] the number of things that are happening in the inner loop.
+[00:27:49] The data sets that they tried this on was GSM8K.
+[00:27:53] So GSM8K is just math problems that you
+[00:27:55] have seen where you're basically asking-- this is a grade school
+[00:27:58] math problems.
+[00:27:59] There are about 9k samples.
+[00:28:01] Then CommonsenseQA.
+[00:28:02] CommonsenseQA is essentially problems
+[00:28:05] that you would see on, say, related to day-to-day stuff.
+[00:28:09] So you will have these multiple-choice questions,
+[00:28:11] and then you have these answers, and there's rationalization
+[00:28:13] that looks like this.
+[00:28:15] And then arithmetic problems, which
+[00:28:16] basically was some sort of an addition problem
+[00:28:19] on multi-digit addition.
+[00:28:22] So they generate the last one was synthetic data
+[00:28:25] where like they generated some of these things themselves.
+[00:28:30] So in terms of results, some of the results
+[00:28:33] that stood out in this paper was that just compared
+[00:28:36] to, say, supervised fine tuning on, say, math benchmark,
+[00:28:39] they could boost with this STaR approach to 51.7%,
+[00:28:44] but they only use 70% to 87% of the data in terms of--
+[00:28:48] so they had to throw out a whole bunch of data that
+[00:28:50] did not have correct solutions.
+[00:28:52] And other challenge is that it's not really true RL.
+[00:28:56] So if you basically do multiple iterations of this,
+[00:28:59] it starts to plateau after a while.
+[00:29:01] So, I mean, RL has its own set of challenges,
+[00:29:05] but here it also starts to plateau.
+[00:29:07] So you have to really pay attention
+[00:29:09] to how many iterations you can do.
+[00:29:11] And there's some amount of tweaking
+[00:29:13] there that you have to do.
+[00:29:16] The other interesting set of results
+[00:29:17] here were that this was on a common sense reasoning.
+[00:29:22] So they actually looked at--
+[00:29:24] this was a question that several folks asked here.
+[00:29:27] They actually tried to see the rationales for CommonsenseQA.
+[00:29:30] They showed it to human raters, and they asked human raters
+[00:29:34] to say how likely they are to prefer the rationales from STaR
+[00:29:39] versus just like otherwise.
+[00:29:43] So STaR generated rationales versus the few-shot rationales
+[00:29:46] in the Rationale data set.
+[00:29:49] They compared those.
+[00:29:50] And what they found was that generally,
+[00:29:53] the qualitative analysis showed that their rationales were
+[00:29:57] pretty reasonable.
+[00:29:58] Now, CommonsenseQA, as you remember,
+[00:29:59] is a natural language like it's tackling daily problems here.
+[00:30:04] So as a result of that, the rationale
+[00:30:08] seemed pretty reasonable.
+[00:30:09] And then the other aspect that they noticed
+[00:30:12] was that STaR, in general, requires--
+[00:30:15] like, if you use direct fine tuning,
+[00:30:16] you basically do get a certain level of accuracy.
+[00:30:19] But STaR with rationalization gets that accuracy,
+[00:30:21] but it requires much less data compared to what
+[00:30:26] you would need for fine tuning.
+[00:30:28] So rationalization helps you get to an accuracy using
+[00:30:33] like-- so 86% of the data is used,
+[00:30:36] but you can basically get to the deficit accuracy of 72.5%
+[00:30:40] compared to using a lot of training data.
+[00:30:43] So this was a very small model.
+[00:30:44] So this was the first signs of life
+[00:30:46] that was shown for reasoning.
+[00:30:48] In terms of mathematical reasoning,
+[00:30:50] this was an interesting one on GSM8K.
+[00:30:53] What they found was that the use of rationalization
+[00:30:55] actually did not improve performance.
+[00:30:57] So like STaR by itself was not helping in this particular case.
+[00:31:01] So what you see is that you have GPT-J like,
+[00:31:05] basically, it improves over the baselines,
+[00:31:07] but it's basically not helping too much.
+[00:31:10] If you directly do fine tuning on good data,
+[00:31:14] then you can actually improve it similarly.
+[00:31:17] So one of the reasons that is the case
+[00:31:18] is the number of calculation steps
+[00:31:20] that were used by the model themselves.
+[00:31:23] If you force the model to use chain-of-thought versus
+[00:31:25] you provide these rationalization steps
+[00:31:28] is actually pretty similar.
+[00:31:29] So in some ways, it was not helping.
+[00:31:32] If the problem is too simple.
+[00:31:34] Like, the whole notion of getting the model
+[00:31:36] to reason if the problem is too simple
+[00:31:39] was basically not helping.
+[00:31:40] So GSM8K for GPT-4o was very much within capability.
+[00:31:44] So similarly for GPT-J, so there was not much improvement here
+[00:31:49] relative too.
+[00:31:50] But it did show that direct fine tuned versus STaR
+[00:31:52] with rationalization you still had some gains.
+[00:31:56] So some takeaways here are that the whole notion
+[00:32:01] of rationalization conditions on the fact
+[00:32:03] that you have an answer, and then you
+[00:32:04] can essentially figure out what rationales would be good.
+[00:32:09] And the outputs without rationalization
+[00:32:12] are examples where the model is already quite confident.
+[00:32:15] But then if you can look at the answer, then in certain cases,
+[00:32:21] it might actually do a better job producing the rationale.
+[00:32:24] And if you do few-shot prompting,
+[00:32:26] you can basically really help the model in how
+[00:32:30] it should produce rationale.
+[00:32:31] But the style of rationale might actually
+[00:32:36] influence the model in certain ways.
+[00:32:38] Like prompt engineering, in this particular case,
+[00:32:41] might bias the model in certain ways.
+[00:32:43] So effectively there are certain challenges.
+[00:32:46] One challenge is that the rationalization the quality
+[00:32:50] has certain amount of effects.
+[00:32:51] And the second bit is that if your few shot prompting, then
+[00:32:54] you are biased by how the rationales were formatted
+[00:32:57] in your few shot prompts, and that
+[00:33:00] might affect what kind of rationales
+[00:33:02] the model would produce and what you're training on.
+[00:33:06] So, overall, I think, this kind of gives us
+[00:33:08] a sense of just that in the model space,
+[00:33:12] if you basically bootstrap the model to generate rationales,
+[00:33:15] you can get high sample efficiency
+[00:33:17] while not having to get humans to generate these reasoning
+[00:33:20] chains.
+[00:33:21] And you can apply it to many problems.
+[00:33:23] Like you can apply it to symbolic problems,
+[00:33:25] natural language, mathematical reasoning.
+[00:33:27] Some of the challenges that are there in this overall techniques
+[00:33:31] is that you don't have a very good evaluation for rationales
+[00:33:35] for most tasks, because you basically
+[00:33:37] have to have a human evaluate them,
+[00:33:39] or you need some sort of a process-reward model
+[00:33:41] to evaluate them.
+[00:33:42] There might be true negatives and false positives.
+[00:33:46] So you're just filtering based on correct answers,
+[00:33:48] so you might have some invalid steps
+[00:33:50] in between which might cause problems.
+[00:33:52] Yes.
+[00:33:54] So this method is useful for frontier models, right?
+[00:34:01] Because if you want to find a small language model,
+[00:34:05] you can just use a faulty model to generate these training data.
+[00:34:10] I don't know how to answer that question.
+[00:34:14] You're saying that--
+[00:34:15] You don't have to rely on a small model
+[00:34:18] to generate this new additional data automatically.
+[00:34:22] I see.
+[00:34:23] You can just use a big model, and it can train new stuff.
+[00:34:26] But I'm wondering the main benefit.
+[00:34:29] I mean, you are actually getting training out from nothing.
+[00:34:34] What it shows when you are training something,
+[00:34:37] which is basically the form.
+[00:34:40] Yes.
+[00:34:41] So the goal for a lot of the work that we're discussing
+[00:34:44] is the ability to--
+[00:34:47] I mean, we're showing the solutions on small models,
+[00:34:50] but at the end of the day, what we
+[00:34:54] want to be able to do is take the model, take its outputs,
+[00:34:56] and then use that to improve the model.
+[00:34:59] You can always take a more powerful model
+[00:35:00] and use it outputs.
+[00:35:01] And that's like distillation process.
+[00:35:05] Yeah, that's great, I mean, the theory.
+[00:35:08] Yes.
+[00:35:09] It's clear, but when it comes to practical applications--
+[00:35:12] Yes.
+[00:35:13] So I will use this method [INAUDIBLE] to pick the next,
+[00:35:20] I don't know, 1 trillion parameter model,
+[00:35:25] and I need additional data, [INAUDIBLE] more data.
+[00:35:29] But that's a fair point.
+[00:35:32] Or you want to basically improve the model
+[00:35:35] on certain set of capabilities that they actually don't have.
+[00:35:38] They won't produce good model outcomes on.
+[00:35:41] So what I mean is that so if I want
+[00:35:45] to improve the performance of a 7 billion parameter model--
+[00:35:50] Yes, in practice.
+[00:35:51] --then I wouldn't use this, because I get high quality
+[00:35:55] data from distillation.
+[00:35:58] [INAUDIBLE] is much higher.
+[00:35:59] Yes.
+[00:36:00] We are not covering distillation,
+[00:36:01] but that's fair point.
+[00:36:03] OK, thank you.
+[00:36:03] Just wanted to clarify.
+[00:36:04] Oh, no, that's a fair point that you
+[00:36:06] can use one of the frontier models and distill things.
+[00:36:08] But this is more an attempt to build it
+[00:36:11] from scratch and for you folks to understand
+[00:36:14] what might that take.
+[00:36:16] Yes.
+[00:36:17] I have a question.
+[00:36:19] I'm curious about why this isn't like full-fledged RL,
+[00:36:22] and also whether--
+[00:36:24] You're leading me to my next slide.
+[00:36:26] OK, great.
+[00:36:27] Oh, and also, I'm also curious.
+[00:36:31] So when you would decide to make the choice of to first train
+[00:36:35] with SFT versus RL, if there's any different implications
+[00:36:38] of how much data or compute is needed?
+[00:36:43] Hold that question until the end.
+[00:36:45] [LAUGHS] But I'm covering that.
+[00:36:47] That's part of the lecture.
+[00:36:53] So in STaR, you basically were just
+[00:36:55] using the correct output, which is like a proxy for a verifier
+[00:36:59] where you already know the answer.
+[00:37:01] If you basically also add a verifier in that whole loop,
+[00:37:05] then that would be called V-STaR.
+[00:37:07] So there was a paper that basically
+[00:37:09] had a generator and a verifier training in a loop.
+[00:37:11] And then Quiet-STaR was essentially
+[00:37:13] adding an internal thinking.
+[00:37:15] So what it was doing was essentially
+[00:37:17] instead of having reasoning steps be in the language space,
+[00:37:21] it was actually putting reasoning steps
+[00:37:23] in the latent space with MLPs.
+[00:37:27] So why have them in English when you
+[00:37:29] can have them have the model thinking internally?
+[00:37:34] So before I move further, actually there
+[00:37:36] have been a lot of questions.
+[00:37:37] So I'll only pick one of these questions.
+[00:37:39] But let's look at question 2.
+[00:37:43] What bounds the performance of STaR as an approach?
+[00:37:53] You can talk to someone for a minute, and then let's chat
+[00:37:57] as a class.
+[00:38:02] Let's come on back as a class.
+[00:38:04] So what performance-- like how's the performance of STaR
+[00:38:07] as a technique?
+[00:38:08] Any takers for that?
+[00:38:19] I'm seeing no hands.
+[00:38:20] You guys are talking.
+[00:38:21] All answers are welcome.
+[00:38:27] Yes.
+[00:38:27] I think this is kind of like a silly answer.
+[00:38:29] We were thinking, like, there are some logical steps that
+[00:38:33] are more complex than others, and you
+[00:38:35] wouldn't expect STaR to be able to make any logical leaps that
+[00:38:38] are not in its training data set.
+[00:38:40] Like the rationalization should all be at
+[00:38:44] the same level as what it was trained on.
+[00:38:47] This allows it to get more rationalization data.
+[00:38:53] OK.
+[00:38:53] So it will not make--
+[00:38:55] I mean, it will basically not have a logical leap
+[00:38:58] into new domains that will have figured out
+[00:39:00] new things is what you're saying.
+[00:39:01] OK.
+[00:39:04] Any other takers?
+[00:39:06] Yeah.
+[00:39:07] [INAUDIBLE] like absolutely [INAUDIBLE]
+[00:39:17] because if the model is really bad at creating
+[00:39:21] new logistic reasoning to introduce raw samples
+[00:39:25] into the training [INAUDIBLE]
+[00:39:30] Say that loudly what you're saying.
+[00:39:33] Yeah, so it seems like this performance is [INAUDIBLE]
+[00:39:36] bounded by model's capability to do reasoning because--
+[00:39:41] I see.
+[00:39:42] Yeah.
+[00:39:43] If the model can't reason when given the hints,
+[00:39:45] that's also not going to work out
+[00:39:48] because the rationalization won't show up at all.
+[00:39:50] Yeah, and raw samples into the data.
+[00:39:54] That opens the question what needs
+[00:39:56] to rethink in the base model?
+[00:40:01] I think some answers make it inherently easier
+[00:40:04] to rationalize than others.
+[00:40:06] For example, if the final answer is like 225,
+[00:40:08] you probably know that at some point,
+[00:40:10] there's a multiplication of 15 and 15
+[00:40:12] or something similar to that, but maybe some other numbers
+[00:40:14] are not as straightforward.
+[00:40:16] And I also think that if there's a lot of problems
+[00:40:20] that you don't know the answer to
+[00:40:21] and that forces you to rationalize,
+[00:40:23] then you probably need more data so
+[00:40:25] that you can form more generalized reasoning
+[00:40:27] to backtrack.
+[00:40:28] OK.
+[00:40:29] I mean, that is in the right direction.
+[00:40:31] Yes.
+[00:40:35] OK.
+[00:40:36] I think all of these answers are fairly valid,
+[00:40:38] but I think this is worth keeping in the back of your mind
+[00:40:41] as you move into RL, because a lot of the magic
+[00:40:43] in this particular domain is like, what can the base model do
+[00:40:47] as we're building on top of that?
+[00:40:51] So we'll come back to that.
+[00:40:53] So the second paper that we'll cover
+[00:40:55] is DeepSeekMath that will focus on mathematical reasoning.
+[00:41:00] And it will actually use a form of RL
+[00:41:02] that it proposed that has become quite popular.
+[00:41:05] So we already looked at this graph earlier
+[00:41:06] where we were basically showing that in math domain, if you
+[00:41:09] do train-time scaling, you can do much better.
+[00:41:12] And OK.
+[00:41:15] So what this slide is showing is that if you
+[00:41:18] look at the performance.
+[00:41:19] So this is a earlier benchmark than AIME.
+[00:41:21] It's actually a simpler benchmark than AIME.
+[00:41:23] It's called Math benchmark, and you're basically
+[00:41:25] looking at Top 1 accuracy.
+[00:41:27] So if you look at the date of the benchmark,
+[00:41:29] you'll see that as the model size is increased, typically,
+[00:41:32] the accuracy on this benchmark has gone up.
+[00:41:35] But then suddenly when DeepSeekMath came out,
+[00:41:37] 7B model was doing really well.
+[00:41:39] And the main leap that they made was
+[00:41:42] that they were able to do the reinforcement learning
+[00:41:44] part in the train-time scaling loop correctly.
+[00:41:47] So we will see what led to that innovation.
+[00:41:51] So the first thing that they got right
+[00:41:53] was that typically when you try to improve on Math,
+[00:41:56] and this was something that was done on top of PaLM
+[00:41:58] as a paper, PaLM model.
+[00:42:00] There was this paper called which
+[00:42:03] improved PaLM model on STEM.
+[00:42:05] And what they did was they trained on a lot
+[00:42:07] of science and math data, typically like archive data.
+[00:42:11] What DeepSeek did it was like, OK,
+[00:42:13] actually, training on archive papers is not the trick.
+[00:42:16] They actually trained on Common Crawl web pages,
+[00:42:19] but they started with a DeepSeek coder model.
+[00:42:22] So they said that if you start with a model that has already
+[00:42:24] been improved on code reasoning, then it will actually do better.
+[00:42:29] And then they did a really good job
+[00:42:31] at curating from content from Common Crawl pages on math.
+[00:42:37] And they found that often arXiv papers in some ways
+[00:42:40] don't have an adequate amount of math content
+[00:42:43] that give us coverage.
+[00:42:45] So OpenWebMath by curating that and mining it and getting better
+[00:42:52] coverage across math domains, they
+[00:42:54] were actually able to get much larger yield
+[00:42:56] in number of tokens.
+[00:42:58] And that was their first exercise
+[00:43:01] in priming the model before they take it to RL.
+[00:43:04] So this was related to one of the comments that
+[00:43:06] were made that if the model is not strong in a certain domain,
+[00:43:10] you do have to improve its capability in that domain.
+[00:43:12] So this is that step.
+[00:43:14] So they basically got coverage across a lot of math domains,
+[00:43:17] showed it a lot of high quality data in math,
+[00:43:19] and they started from a code pre-trained model.
+[00:43:23] And so they actually showed that archive training was actually
+[00:43:26] not really helping, but code to math
+[00:43:29] significantly helped because it allowed the model
+[00:43:32] to reason better, to tool use better.
+[00:43:34] This was actually the first time that this
+[00:43:37] was shown that if you start from a coding-based model,
+[00:43:40] you could do better.
+[00:43:41] And then the other thing that they showed
+[00:43:43] was that the curation of data really
+[00:43:45] helped in this particular case.
+[00:43:48] Now, the second step that they did
+[00:43:50] was, OK, now that you have trained the model
+[00:43:56] on math using supervised fine tuning, what do you do next?
+[00:43:59] So they actually scale up their RL.
+[00:44:01] Now, the typical RL algorithm that
+[00:44:03] has been used in RL for human feedback, even with verifiers
+[00:44:06] is called PPO.
+[00:44:08] So you have to keep your policy and your new policy.
+[00:44:11] So you basically this ends up being a memory problem
+[00:44:14] if you try to do it on larger models.
+[00:44:15] Like 7B model is fine, but if you try to scale up RL,
+[00:44:19] you have to keep multiple policy models,
+[00:44:20] and then you also have to learn a critic model and a reward
+[00:44:23] model.
+[00:44:24] So typically, in the RL loop, you
+[00:44:25] have an old policy, a new policy that you're learning.
+[00:44:29] You have a critic that's basically giving feedback.
+[00:44:32] And then you have a reward model that's assigning the rewards.
+[00:44:35] So keeping all four of the copies of models
+[00:44:37] starts to become challenging.
+[00:44:38] So what they did was they proposed
+[00:44:40] a new technique called GRPO, where
+[00:44:42] instead of having a critic or a value function estimate things,
+[00:44:47] they basically use some sort of a generalized advantage
+[00:44:51] estimation that I'll show you in the next slide.
+[00:44:53] And then you only have three copies of the model.
+[00:44:55] So now the PPO, which needed a lot more memory,
+[00:45:00] instead of that GRPO essentially could use
+[00:45:02] just a group for the baseline.
+[00:45:04] And the way that works is that for each question,
+[00:45:07] you sample a lot of the answers.
+[00:45:10] And then you score them, and you normalize the reward
+[00:45:14] of-- so this is the score that you gave for each of the answers
+[00:45:17] using the reward model.
+[00:45:18] And then you normalize the reward
+[00:45:19] as reward minus mean of rewards divided by standard deviation.
+[00:45:22] And then this becomes your advantage basically.
+[00:45:25] So typically, if you look at the way DPO works
+[00:45:28] or all of those techniques works,
+[00:45:30] you're basically going to compare the rewards.
+[00:45:33] So by doing a reward minus mean of rewards divided
+[00:45:35] by standard deviation, you're effectively
+[00:45:37] providing a comparative technique across rewards.
+[00:45:42] And the why.
+[00:45:45] So the reason this made sense was
+[00:45:47] because reward models are going to essentially be
+[00:45:49] trained on comparisons anyway.
+[00:45:50] So by providing the group context you can save memory,
+[00:45:53] and now you can start scaling up RL.
+[00:45:55] And your advantage function in this particular case
+[00:45:57] is essentially-- so I didn't add the full formula because I just
+[00:46:01] wanted you guys to have intuition.
+[00:46:02] You could just take the reward, subtract the average reward,
+[00:46:05] and then divide that by the spread of rewards.
+[00:46:07] And you can get an estimate of the advantage.
+[00:46:09] And on Math, they were able to go from 46.8% to 51.7%.
+[00:46:14] And this was actually the first open source model at 7B scale
+[00:46:16] that crossed like 50% without having a critic.
+[00:46:20] This is a much earlier paper, but then this
+[00:46:22] gives you a sense of the technique that they used.
+[00:46:25] And further, what they showed was
+[00:46:27] that if you look at different variants of RL,
+[00:46:30] effectively what you're changing is either the data source.
+[00:46:33] So I showed you how they curated their data.
+[00:46:35] And then you're deciding how to compute the gradients.
+[00:46:39] The gradient depends on gradient coefficient
+[00:46:41] and the probability of the output given the question.
+[00:46:45] So the gradient coefficient computation changes
+[00:46:47] in different algorithms.
+[00:46:48] So their estimate of gradient coefficient
+[00:46:50] was coming from this group estimator group baseline, which
+[00:46:55] worked well for a single-step problem
+[00:46:57] where you're just trying to get the answer.
+[00:47:00] So if you compare approaches like STaR,
+[00:47:03] where you basically are just generating things once,
+[00:47:06] and if you get correct one, you basically get a reward of 1
+[00:47:11] if it's correct and 0 if it's wrong,
+[00:47:13] or if you do online rejection fine tuning,
+[00:47:16] you are still generating things online,
+[00:47:19] but you only get a reward of 1 if it's
+[00:47:20] correct and 0 if it's wrong.
+[00:47:22] So you basically reject anything that is incorrect.
+[00:47:25] GRPO is generating rewards online with a reward model,
+[00:47:29] but it's basically getting an advantage function
+[00:47:31] because you're doing multiple samples,
+[00:47:33] and then you're giving them a score.
+[00:47:35] And the advantage for that score comes from this group baseline
+[00:47:40] by computing the mean and then dividing it
+[00:47:42] by the spread of rewards.
+[00:47:43] So now you can ask me the question
+[00:47:46] that you were asking me earlier about the difficulty
+[00:47:48] of the problems.
+[00:47:50] Oh, the difficulty of the problem that I make
+[00:47:54] regression on simpler questions.
+[00:47:56] Yes.
+[00:47:57] Yeah.
+[00:47:57] So I'm curious if you are updating the model
+[00:48:04] with fine tuning for difficult questions,
+[00:48:07] you are essentially updating all the weights.
+[00:48:09] So isn't that going to potentially,
+[00:48:11] theoretically, have any regression on simpler questions
+[00:48:14] or other metrics?
+[00:48:15] So this is the table I wanted to show you.
+[00:48:18] So effectively, if you're basically
+[00:48:21] trying to close the loop, what you're trying to figure out
+[00:48:23] is how much reward you're giving.
+[00:48:25] So simple problems effectively, might
+[00:48:28] equate you're going to get a reward of 1 anyways,
+[00:48:30] and you're never getting a reward of 0.
+[00:48:33] And with GRPO, you're getting some form
+[00:48:36] of a distribution of rewards that I was showing here.
+[00:48:39] So if you don't have any distribution and rewards, then--
+[00:48:43] so effectively what you want is some form
+[00:48:45] of a distribution of rewards across the set of problems
+[00:48:47] you are showing.
+[00:48:49] If there is not a distribution of rewards,
+[00:48:50] there is nothing for the model to learn.
+[00:48:52] Like, if all the rewards are 0 or all the rewards are 1,
+[00:48:55] then basically the normalization doesn't work.
+[00:48:58] Does that make sense?
+[00:49:01] Yes, but--
+[00:49:01] This we will solve in the next--
+[00:49:05] the shortcoming of this particular method we
+[00:49:08] will solve in the next paper.
+[00:49:09] But this reward is specific to like this one particular feature
+[00:49:15] that we're trying to train and not
+[00:49:17] the basic overall holistic benchmark
+[00:49:20] that we trained for the previous model before.
+[00:49:23] So I mean, it's basically taking problems and then computing
+[00:49:27] answers, right?
+[00:49:29] If across the model, you basically
+[00:49:31] are showing problems that are all very hard,
+[00:49:34] then the model has no capacity to learn
+[00:49:36] because it will basically have no reward at any point.
+[00:49:39] I see.
+[00:49:41] It needs some hill climbing signal, right?
+[00:49:43] Again, I'm not showing you a formula.
+[00:49:46] I'm intuitively explaining it to you.
+[00:49:49] Yes.
+[00:49:50] Oh, yeah.
+[00:49:51] Actually, I just wanted to comment on that piece quickly.
+[00:49:54] I think my interpretation of actually the solution to that
+[00:49:57] is in the original paper is like, oh,
+[00:50:00] PPO that's why there's a KL divergence term.
+[00:50:02] OK.
+[00:50:02] So essentially, it is a valid concern,
+[00:50:04] because it's like we're updating the weights.
+[00:50:06] We could probably [INAUDIBLE] far like--
+[00:50:07] Oh, I see.
+[00:50:08] --the model.
+[00:50:09] And maybe we can get really good at answering these benchmarks.
+[00:50:11] But if we got really optimized on all these several benchmarks
+[00:50:15] earlier [INAUDIBLE].
+[00:50:16] Also, I think, in addition to the normalized rewards,
+[00:50:19] we also have somewhat divergence of penalty and policy
+[00:50:23] conditions.
+[00:50:23] OK, that's a fair interpretation that you add KL divergence,
+[00:50:27] and then you don't deviate from what it could already solve.
+[00:50:31] OK.
+[00:50:32] Yeah, I was interpreting it more along the lines
+[00:50:34] of how do you have good distribution of problems
+[00:50:38] so that the model has the right hill climbing signal,
+[00:50:40] but I think what you're saying is that if the model could
+[00:50:42] already solve something, then KL divergence solves
+[00:50:44] that part of the problem.
+[00:50:46] OK.
+[00:50:46] Thank you.
+[00:50:47] I was listening to the question is like,
+[00:50:49] so if you are trying to post train
+[00:50:52] so that it has a new feature, do you really
+[00:50:55] have to update all the weights?
+[00:50:57] No, I don't think so.
+[00:50:58] I mean, there have been some more recent works
+[00:51:00] that have shown--
+[00:51:01] there are some blog posts that have been recently shown
+[00:51:03] that you can do with lower updates and so on.
+[00:51:09] So I do think that KL divergence or some subset of features
+[00:51:13] could solve that problem.
+[00:51:15] I think the reason this is interesting
+[00:51:18] is that you want perhaps that these kind of techniques
+[00:51:23] allow you to improve the model overall.
+[00:51:27] Yeah.
+[00:51:30] More questions?
+[00:51:32] We have a mindset of just have more
+[00:51:34] compute be like, I don't know, like whether it's 0 or 1.
+[00:51:37] But for this one, how do you come up with a key-node score?
+[00:51:42] How do you come up with a clean score?
+[00:51:44] A key-node score.
+[00:51:45] Oh, because you train a reward model, right?
+[00:51:49] I mean, you can also have zeros and ones there,
+[00:51:51] and then you can average things but--
+[00:51:53] So zero or one is like, say, how do [INAUDIBLE]?
+[00:51:59] So what I was showing you is you are training a reward model
+[00:52:02] that is basically going to give you a score for that feedback.
+[00:52:06] Yeah.
+[00:52:07] If you only use 0 and 1, that can be a proxy,
+[00:52:11] but then you can do some averaging.
+[00:52:17] OK?
+[00:52:19] So what this roughly tells you is
+[00:52:21] that if you do basically the online reinforcement learning
+[00:52:24] loop and you sample from the current model,
+[00:52:26] that beats what we were doing earlier,
+[00:52:29] we were in STaR approach.
+[00:52:31] So overall, what they showed was that you can improve
+[00:52:34] the majority of the-- like, if they had 32 tries,
+[00:52:37] it was improving the majority at K,
+[00:52:40] but it was actually not improving past K.
+[00:52:42] So if you were basically looking plotting past K, say,
+[00:52:48] one is correct.
+[00:52:48] If you sample 32 times, then that was not what
+[00:52:50] was improving in their paper.
+[00:52:52] What was improving was that majority of the solutions
+[00:52:54] become correct.
+[00:52:56] That's what was improving in this particular paper.
+[00:52:58] So the model actually became more consistent,
+[00:53:02] not fundamentally smarter, was what they showed.
+[00:53:06] Now we'll cover the last paper called DAPO, which is basically
+[00:53:11] going to fix some of the problems
+[00:53:13] with respect to reasoning on harder problems.
+[00:53:16] So if you naively scale up GRPO and want
+[00:53:20] to do this on even a Qwen-32B, model,
+[00:53:22] which is very easily accessible, you
+[00:53:25] would get 30% on AIME benchmark.
+[00:53:27] And here I will show you a lot of technical terms,
+[00:53:30] but I will try to explain to you intuitively
+[00:53:33] some of the challenges in just doing this on Qwen-32B ends
+[00:53:36] up being like the entropy of the model collapses.
+[00:53:39] The model can become too confident.
+[00:53:40] The training can become unstable.
+[00:53:42] And the response length, the model output length,
+[00:53:45] can become uncontrollable.
+[00:53:47] Like it can explore uncontrollably.
+[00:53:48] But DeepSeek did get 47% on AIME.
+[00:53:51] Like the DeepSeek carbon paper did get 47%.
+[00:53:54] So "DAPO," as a published piece of work tries to make explicit
+[00:54:00] what were the techniques in RL that were not covered in, say,
+[00:54:04] GRPO.
+[00:54:05] So some of the techniques that they talk about
+[00:54:07] is that in PPO you have to do--
+[00:54:10] so you're basically trying to do some sort of exploration
+[00:54:12] in your standard PPO algorithm.
+[00:54:15] And the standard PPO clipping treats the increasing
+[00:54:20] and the decreasing on that very similar.
+[00:54:24] So basically, if you have a low probability token,
+[00:54:27] it can only hill climb so much, and then the high probability
+[00:54:30] token can also get clipped.
+[00:54:32] So the exploration can collapse.
+[00:54:34] So basically, the clipping function in the PPO algorithm
+[00:54:38] needs to be asymmetric, and that will allow bigger increases.
+[00:54:41] So that was the first thing that "DAPO" found.
+[00:54:45] In terms of graphs, what that really
+[00:54:47] meant was that if you did clipping,
+[00:54:50] then your accuracy was much better.
+[00:54:52] And if you could allow clipping higher,
+[00:54:55] if you could allow asymmetric clipping,
+[00:54:57] the purple plot shows you that you
+[00:54:58] could achieve much higher accuracy,
+[00:55:00] and your entropy on the right side stayed more stable
+[00:55:03] and did not collapse.
+[00:55:04] While if you did have--
+[00:55:07] did I invert that?
+[00:55:08] So this is higher accuracy, and then the entropy
+[00:55:10] is looking nicer.
+[00:55:11] And then if you did not do asymmetric clipping,
+[00:55:14] then your entropy has collapsed.
+[00:55:16] So entropy is a proxy for how much exploration
+[00:55:19] is possible in the model.
+[00:55:21] A second very interesting technique,
+[00:55:24] which actually relates to what we were talking about earlier,
+[00:55:27] was something called dynamic sampling.
+[00:55:30] So what I showed you for GRPO was that, OK,
+[00:55:33] you go and sample 64 solutions, and then you
+[00:55:36] come up with a distribution on them,
+[00:55:38] and then you take a group baseline.
+[00:55:40] What DAPO said was, OK, well, how about we oversample?
+[00:55:44] How about we don't just use 64 samples?
+[00:55:47] How about we oversample?
+[00:55:48] And then what we want is that we will filter out
+[00:55:50] things that have zero reward and one reward so that what we want
+[00:55:54] is basically a nice distribution so that most of the solutions
+[00:55:58] have some sort of a signal.
+[00:56:01] So they filter out all correct and all wrong groups,
+[00:56:04] and they keep only some subset between 0 and 64.
+[00:56:09] So they're basically doing dynamic sampling
+[00:56:11] because they don't want to waste their gradient.
+[00:56:14] Your advantage should not be 0.
+[00:56:16] Like, if basically your rewards are all correct or all wrong,
+[00:56:20] then those groups are filtered out,
+[00:56:21] and you essentially want to keep only those groups that
+[00:56:25] have some signal.
+[00:56:27] So this maintains an effective batch size because in RL,
+[00:56:30] if you have effective batch size for propagating the gradients
+[00:56:34] because you're not computing gradients
+[00:56:35] from all correct and all wrong anyways.
+[00:56:38] Questions?
+[00:56:43] That's cool.
+[00:56:44] Did you find a conclusion [INAUDIBLE]
+[00:56:47] Great question.
+[00:56:47] Yes.
+[00:56:48] So you have a batch of questions when you are training
+[00:56:52] and then you're filtering out questions.
+[00:56:56] Yeah.
+[00:56:58] It seems 64 samples is quite small.
+[00:57:01] I'm wondering if it's because there's
+[00:57:04] very limited amount of AIME questions out there
+[00:57:07] and whether that was enough?
+[00:57:10] So this is a more an exemplar here.
+[00:57:13] You can choose how many samples you pick,
+[00:57:15] but at the end of the day, this is mostly
+[00:57:18] to showcase what was possible from their paper.
+[00:57:22] So AIME yeah, this would be benchmark specific
+[00:57:24] and the difficulty of the benchmark
+[00:57:25] and the capability of the base model.
+[00:57:32] I think the third bit that is worth noting
+[00:57:34] is that the reasoning chains have a certain amount of length
+[00:57:39] that matters.
+[00:57:40] So if you are basically doing a sample level loss or sample
+[00:57:44] level means that for each question and answer pair,
+[00:57:47] that that sequence you're computing a loss,
+[00:57:49] then each answer is basically counted globally.
+[00:57:51] So in certain cases, if you have a very long garbage
+[00:57:55] answer in the model output, then that basically gets same weight
+[00:57:59] as a short good answer.
+[00:58:01] So they effectively suggest that you
+[00:58:03] should have some effectively length penalty, which
+[00:58:06] should put a better-- they want to shape based on the length,
+[00:58:11] so they put a token-based loss as opposed
+[00:58:14] to putting a sample-level loss, and that they gave them
+[00:58:16] some gain.
+[00:58:17] And in particular, what they were controlling for
+[00:58:20] is both the entropy and the mean response length.
+[00:58:22] So effectively, if they didn't have a token-level loss,
+[00:58:25] they were noticing that the entropy was growing,
+[00:58:27] and the response length was also not looking
+[00:58:30] like it was growing uncontrollably.
+[00:58:32] So they wanted to shape that better by putting
+[00:58:35] some form of a penalty there.
+[00:58:38] So they put a token level loss for that.
+[00:58:41] And then finally, there are certain cases in which the model
+[00:58:48] encounters a hard problem.
+[00:58:50] So it basically gets truncated at the end,
+[00:58:52] because it was thinking, and it was basically
+[00:58:56] producing model outputs.
+[00:58:57] And these truncated reasoning chains
+[00:58:59] can generate a lot of noise.
+[00:59:01] So they basically put a gradual penalty in the tokens
+[00:59:05] to deal with that, and that allowed the training
+[00:59:08] to become stable instead of adding noise.
+[00:59:10] So effectively, the generation entropy
+[00:59:13] instead of becoming unstable once the model was learning
+[00:59:17] to generate like really--
+[00:59:19] the model as it progresses starts
+[00:59:21] to generate longer and longer reasoning chains
+[00:59:24] and that can get truncated and that can cause problems.
+[00:59:27] So there are a couple of different ways
+[00:59:29] in which different papers have tried to tackle this.
+[00:59:31] One is that either they increase the context length over RL loop
+[00:59:35] to handle that.
+[00:59:36] In this particular case, they are basically
+[00:59:38] putting this penalty function so that they can handle this part.
+[00:59:43] So, overall, what this showed was
+[00:59:44] that when you started with GRPO on this AIME benchmark,
+[00:59:49] if you put overlong filtering, you went from 30 to 36
+[00:59:52] on the quantity to be model.
+[00:59:54] If you did asymmetric clipping, you could go to 38.
+[00:59:58] With soft overlong punishment, you could go to 41.
+[01:00:01] And then with token level loss you go to 42.
+[01:00:03] And then if you do dynamic sampling, where you're basically
+[01:00:06] doing a better distribution of rewards across the batch,
+[01:00:10] you have a better signal propagation.
+[01:00:12] You basically go to 50, which was
+[01:00:14] even better than what DeepSeeL-R1 distilled down
+[01:00:17] to Qwen-32B had done.
+[01:00:18] So they could actually hill climb on the Qwen-32B themselves
+[01:00:22] and get to a pretty strong score here.
+[01:00:25] So some of the learnings from this paper
+[01:00:28] was that the loss function by itself
+[01:00:31] was not a reasonable enough proxy.
+[01:00:32] When you're learning in RL.
+[01:00:33] You have to look at the response length.
+[01:00:35] You have to look at the entropy and keep it
+[01:00:37] so that it's not too low but it's not too high either.
+[01:00:40] And then the percentage of samples
+[01:00:42] that have a full accuracy of 1 tells you
+[01:00:45] how much you need to sample.
+[01:00:46] So all three are important principles in learning in RL,
+[01:00:52] and some of the challenges that you
+[01:00:54] might have to look out for is that if you're a response
+[01:00:57] length in the model outputs is exploding,
+[01:00:59] then you have to control the loss there.
+[01:01:01] You have to control the entropy.
+[01:01:02] And then if you're not seeing improvement
+[01:01:04] after a certain number of steps, then your reward model
+[01:01:08] actually might be saturated.
+[01:01:11] So, effectively, what this is saying
+[01:01:12] is that the optimization in the RL loop is harder.
+[01:01:17] So if I were to answer the question that
+[01:01:18] was brought up earlier of SFT versus RL,
+[01:01:21] RL does provide you in the domains
+[01:01:24] where you do have a strong reward signal,
+[01:01:26] it does provide you the ability to hill climb
+[01:01:28] with fewer number of examples, but it does take a lot of work
+[01:01:32] to get it right.
+[01:01:33] While supervised fine tuning oftentimes if you do
+[01:01:35] have access to a lot of high-quality data,
+[01:01:37] it's faster way to just improve the model performance
+[01:01:40] in certain cases, but it doesn't bring reasoning capabilities
+[01:01:44] or boost them in certain ways.
+[01:01:49] So if you were to compare the three different techniques
+[01:01:52] that we talked about today.
+[01:01:56] So if you basically only had a few different examples like 100
+[01:01:59] examples with reasoning, and you are effectively just
+[01:02:02] like playing around with a model,
+[01:02:05] and you don't have RL infrastructure,
+[01:02:07] STaR is a pretty good way for you
+[01:02:09] to start getting the model to reason.
+[01:02:12] And simple reasoning tasks like GSM8K
+[01:02:15] actually will see a reasonable amount of improvement there.
+[01:02:18] Maybe not phenomenal, but you're still
+[01:02:20] staying within what the model was capable of.
+[01:02:22] If you go to DeepSeekMath and you use GRPO,
+[01:02:26] you do need a good enough base model.
+[01:02:28] Plus, like you do need to prime the model with good instruction
+[01:02:33] data.
+[01:02:33] But now you have a reasonably strong algorithm
+[01:02:37] that can work even if you don't have enough memory--
+[01:02:40] you have a limited number of GPUs.
+[01:02:42] And then for standard math reasoning tasks,
+[01:02:44] this was well proven.
+[01:02:49] And you need double kind of techniques when your reasoning
+[01:02:52] chains will end up being longer, which typically correlates
+[01:02:54] with harder problems.
+[01:02:55] So if your reasoning chains are going to be much longer,
+[01:02:58] you need state-of-the-art performance,
+[01:03:00] then you do need to control all of these variables in your RL
+[01:03:03] algorithm and infrastructure.
+[01:03:04] But for competition-level problems like AIME and IMO
+[01:03:08] this is very useful.
+[01:03:12] So what is it that we expect to improve?
+[01:03:15] All three techniques will improve,
+[01:03:16] in general, the majority at K performance on the y-axis
+[01:03:20] as you put more compute.
+[01:03:22] The answer formatting generally will improve
+[01:03:25] as you apply these techniques.
+[01:03:27] And in general, the model will be more
+[01:03:29] coherent over multiple steps.
+[01:03:31] But none of these will yet improve
+[01:03:33] the fundamental capability, or just
+[01:03:34] teach the model to solve new problems,
+[01:03:37] or generalize a lot out of domain.
+[01:03:39] So there is some set of questions
+[01:03:40] that are being asked at this point in time,
+[01:03:43] what would it take for the last part to start improving?
+[01:03:48] Yes.
+[01:03:49] So I'm wondering whether [INAUDIBLE] you've
+[01:03:53] just [INAUDIBLE] so hard like all right or all wrong,
+[01:03:58] because this if you've done that part, that's
+[01:04:02] like the only way you want that is on the [INAUDIBLE]
+[01:04:09] So with that, it's [INAUDIBLE]
+[01:04:16] I see.
+[01:04:17] I'm just wondering whether there's like--
+[01:04:21] That's not the reason.
+[01:04:22] I think the more fundamental question is that to.
+[01:04:24] Improve past K, you're basically improving
+[01:04:27] the fundamental capability of the model to solve new problems.
+[01:04:30] So you want to see the model show capabilities
+[01:04:34] in certain ways.
+[01:04:35] So typically, the fundamental capability scaling comes from--
+[01:04:40] the fundamental capability step jumps
+[01:04:42] have typically been seen by either some sort
+[01:04:45] of a breakthrough or by scaling in some dimension.
+[01:04:48] OK, so you see that this thing has a set of problems,
+[01:04:53] always [INAUDIBLE].
+[01:04:55] Then it's possible that--
+[01:04:57] I'm not sure whether this is frankly true.
+[01:05:00] So you can answer the question.
+[01:05:02] Some other models can get the answer and then go back.
+[01:05:07] Let's take that one offline.
+[01:05:11] OK, so one of the things that I keep highlighting is something
+[01:05:16] to keep in mind is that a lot of the RL loop or even
+[01:05:19] the STaR method, like the quality of rationale,
+[01:05:22] all of that depends on the ability of the model to reason
+[01:05:25] or there needing to be some sort of a verifier or a reward model.
+[01:05:29] And the reward models if the model is too capable,
+[01:05:32] then the reward rewards will get hacked.
+[01:05:35] And if the reward model doesn't have enough signal,
+[01:05:37] then you're basically not able to hill climb the loop.
+[01:05:40] So it is a harder optimization problem in that respect.
+[01:05:46] Last lecture or last Friday, we looked at the autonomous coding
+[01:05:52] applications where you do have access to verifiable rewards
+[01:05:56] because you have-- like in math and code,
+[01:05:58] you have the final correct answer.
+[01:05:59] Then you can also give execution feedback, which
+[01:06:01] was the RL paper we looked at.
+[01:06:03] And then you also have unit test execution.
+[01:06:06] Similarly, there are some domains
+[01:06:08] in which you have this kind of verification available,
+[01:06:11] so it's easy for you to hill climb.
+[01:06:13] But then how many such places do you have this signal available?
+[01:06:17] These questions will continue to come up.
+[01:06:18] So what verification signals are good enough,
+[01:06:22] and then there's, can you use an ensemble
+[01:06:24] of verifiers instead of one single verifier
+[01:06:27] to make up for the gaps of what a single verifier will provide
+[01:06:31] signal on.
+[01:06:32] So all of these questions are extremely important.
+[01:06:36] So in terms of if you were to look
+[01:06:37] at open problems in this domain, so, I think,
+[01:06:40] this is still an active-- train-time scaling
+[01:06:42] is an active area of research.
+[01:06:45] I already highlighted this.
+[01:06:46] There's a fundamental question of why
+[01:06:49] only majority had K increases?
+[01:06:50] Why does Pass@K doesn't increase.
+[01:06:53] A second question is that we do see in the reasoning chains
+[01:06:57] things like backtracking or the model is able to self-evaluate,
+[01:07:02] self-correct.
+[01:07:02] We did show those examples early on,
+[01:07:04] but are those behaviors real?
+[01:07:06] Like these reasoning behaviors are
+[01:07:07] they emerging or were they already present
+[01:07:10] and they're basically statistically becoming more
+[01:07:13] prevalent?
+[01:07:14] And then a third bit right now is
+[01:07:15] that we don't really have very good techniques to learn
+[01:07:18] from failures.
+[01:07:18] There have been a few papers that
+[01:07:20] have tried to learn from failures in useful ways,
+[01:07:22] but currently, a lot of the techniques just filter them out.
+[01:07:26] Some promising directions that people continue
+[01:07:29] to explore in this is along the data dimension
+[01:07:31] of how do you generate better data to train the model?
+[01:07:34] Along the algorithm dimensions of like
+[01:07:36] how do you get the reinforcement learning to be robust to noise
+[01:07:40] in the reward models?
+[01:07:41] What kind of rewards should we use?
+[01:07:43] And then can you combine some of the rationalization techniques
+[01:07:46] that we did with in STaR with, say, the techniques that we
+[01:07:50] did in DAPO?
+[01:07:51] So all of those are very interesting directions
+[01:07:54] that you could look into for your projects.
+[01:07:58] And with that, we have a few minutes left,
+[01:08:00] but let's have questions.
+[01:08:04] For the new, big like out-of-the-box models that
+[01:08:09] Anthropic and OpenAI are training,
+[01:08:13] how much do you think they're still relying on just like
+[01:08:16] common call like mixed token prediction,
+[01:08:20] like raw text data like that they take from the internet
+[01:08:25] or anywhere rather than instruction training data that
+[01:08:30] they generate using reasoning techniques and techniques that
+[01:08:34] we learned today?
+[01:08:35] What do you think is that fraction?
+[01:08:37] I see.
+[01:08:38] So I don't think that's published for Anthropic,
+[01:08:41] but I think Grok was more public.
+[01:08:43] So, typically, the percentage of reinforcement learning versus
+[01:08:48] pre-training has been closer to--
+[01:08:51] I think last year it was closer to say 99%, 1%,
+[01:08:54] and then it's grown to perhaps like 5% or something like that.
+[01:08:59] Grok-4 claimed that it did 50% RL,
+[01:09:02] but it actually did not quite improve.
+[01:09:04] Like 50% RL should give a big jump,
+[01:09:07] but your bottleneck by a lot of the things that I'm showing you
+[01:09:10] here of your rewards are not strong enough,
+[01:09:14] or there is noise in rewards, all of those things
+[01:09:16] are going to be bottlenecks.
+[01:09:17] So there is still a lot of open problems in this domain.
+[01:09:21] Yeah.
+[01:09:23] Let's see if there are more questions across the board,
+[01:09:26] or is this lecture too complex for people to ask questions?
+[01:09:31] Too complex, OK.
+[01:09:35] Happy to answer questions after.
+[01:09:43] More questions across the class.
+[01:09:45] No?
+[01:09:46] I have a question.
+[01:09:50] You go back to the previous page.
+[01:09:51] You have [INAUDIBLE].
+[01:09:59] Is this something like if the model performed, oh, hey,
+[01:10:06] this is calculus, and you help it to [INAUDIBLE] RL,
+[01:10:11] and if the model never seen [INAUDIBLE] regardless
+[01:10:17] how well it [INAUDIBLE], it can never infer either option.
+[01:10:20] Like Is that a fundamental reason?
+[01:10:22] Like [INAUDIBLE] is like fundamentally you think
+[01:10:26] you need [INAUDIBLE] knowledge.
+[01:10:27] Mhm.
+[01:10:28] [INAUDIBLE] is like you [INAUDIBLE].
+[01:10:31] Exactly.
+[01:10:32] Yes.
+[01:10:34] OK, so maybe that's something like that's not the reason,
+[01:10:40] [INAUDIBLE], because reinforcement learning
+[01:10:42] is getting better at something you already can do.
+[01:10:48] Yeah, it's basically able to explore better
+[01:10:50] in the design space of what it knows,
+[01:10:52] and by exploration and search, it's
+[01:10:54] able to arrive at the solution.
+[01:10:59] There was a question here, which I didn't let you ask.
+[01:11:02] All right.
+[01:11:03] Yeah, I was curious for especially
+[01:11:05] on the directions of the--
+[01:11:07] so for very unique data set like AIME or [INAUDIBLE]
+[01:11:12] where the number of data sets is very limited,
+[01:11:15] how can we ensure that we have enough signals
+[01:11:19] for verifiable rewards?
+[01:11:22] I mean, there's not enough data, but we need a lot of signal.
+[01:11:25] So how can you make sure that you have enough training
+[01:11:29] and verification without accidentally leaking data?
+[01:11:33] So I mean, RL is more data efficient,
+[01:11:36] so you do not need that much data to begin with.
+[01:11:39] So, I mean, like, that's why I was presenting these papers.
+[01:11:41] You do see that a certain number of enough examples
+[01:11:46] is good enough to hill climb.
+[01:11:49] The verification signals are more
+[01:11:50] a function of having good set of verifiers.
+[01:11:53] So I think it's already covered the ensemble verifier paper.
+[01:11:56] We already covered that.
+[01:11:58] So it's not just a matter of having a single verifier.
+[01:12:00] You can have multiple verifiers.
+[01:12:03] I see.
+[01:12:04] So when there's not enough data, we
+[01:12:06] can just make up for that with many more verifiers?
+[01:12:10] So I think you solve the data problem separately.
+[01:12:12] But I don't think there are not enough data
+[01:12:15] is the right abstraction.
+[01:12:16] I think it's do you have enough data to hill climb
+[01:12:19] on is the right abstraction.
+[01:12:23] End up filtering out if you were doing
+[01:12:25] dynamic sampling, for example.
+[01:12:28] OK, with that, we'll close the class, and I'm still around.
+[01:12:31] Thanks, everyone.
